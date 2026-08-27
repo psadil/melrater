@@ -50,3 +50,19 @@ def test_arrow_key_navigates_to_next_component(
 
     # Assert
     assert logged_in_page.url.endswith("/ic/2/")
+
+
+def test_axis_choice_persists_across_navigation(
+    logged_in_page, live_server, ingested_run: Run
+) -> None:
+    # Arrange: choose coronal on one component (wait for the preference POST)
+    logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
+    with logged_in_page.expect_response("**/prefs/axis/"):
+        logged_in_page.click('[data-axis-btn="coronal"]')
+
+    # Act: move to the next component
+    logged_in_page.keyboard.press("ArrowRight")
+    logged_in_page.wait_for_url("**/ic/2/")
+
+    # Assert
+    assert logged_in_page.locator('img[data-axis-img="coronal"]').is_visible()

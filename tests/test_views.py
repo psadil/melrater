@@ -127,6 +127,66 @@ def test_rate_post_rejects_bad_label(logged_in, ingested_run: Run) -> None:
     assert response.status_code == 400
 
 
+def test_default_axis_is_axial(logged_in, ingested_run: Run) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert
+    assert 'class="axis-btn active" data-axis-btn="axial"' in response.content.decode()
+
+
+def test_set_axis_stores_session_preference(logged_in, ingested_run: Run) -> None:
+    # Act
+    response = logged_in.post("/prefs/axis/", {"axis": "coronal"})
+
+    # Assert
+    assert (response.status_code, logged_in.session["montage_axis"]) == (204, "coronal")
+
+
+def test_axis_preference_persists_across_components(
+    logged_in, ingested_run: Run
+) -> None:
+    # Arrange: choose coronal while viewing one component
+    logged_in.post("/prefs/axis/", {"axis": "coronal"})
+
+    # Act: navigate to a different component
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/")
+
+    # Assert
+    assert (
+        'class="axis-btn active" data-axis-btn="coronal"' in response.content.decode()
+    )
+
+
+def test_stale_session_axis_falls_back_to_axial(logged_in, ingested_run: Run) -> None:
+    # Arrange: an invalid value left behind (e.g. by an older code version)
+    session = logged_in.session
+    session["montage_axis"] = "oblique"
+    session.save()
+
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert
+    assert 'class="axis-btn active" data-axis-btn="axial"' in response.content.decode()
+
+
+def test_set_axis_rejects_unknown_axis(logged_in, ingested_run: Run) -> None:
+    # Act
+    response = logged_in.post("/prefs/axis/", {"axis": "oblique"})
+
+    # Assert
+    assert response.status_code == 400
+
+
+def test_set_axis_requires_login(client, ingested_run: Run) -> None:
+    # Act
+    response = client.post("/prefs/axis/", {"axis": "coronal"})
+
+    # Assert
+    assert response.url.startswith("/accounts/login/")
+
+
 def test_media_redirects_anonymous_to_login(client, ingested_run: Run) -> None:
     # Act
     response = client.get(

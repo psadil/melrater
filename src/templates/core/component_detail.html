@@ -29,11 +29,12 @@
   <div class="brain">
     <div class="axis-btns">
       {% for axis, url in montages.items %}
-        <button class="axis-btn{% if axis == 'axial' %} active{% endif %}" data-axis-btn="{{ axis }}">{{ axis }}</button>
+        <button class="axis-btn{% if axis == active_axis %} active{% endif %}" data-axis-btn="{{ axis }}"
+                hx-post="{% url 'set-axis' %}" hx-vals='{"axis": "{{ axis }}"}' hx-swap="none">{{ axis }}</button>
       {% endfor %}
     </div>
     {% for axis, url in montages.items %}
-      <img class="montage{% if axis == 'axial' %} active{% endif %}" data-axis-img="{{ axis }}"
+      <img class="montage{% if axis == active_axis %} active{% endif %}" data-axis-img="{{ axis }}"
            src="{{ url }}" alt="{{ axis }} lightbox">
     {% endfor %}
     <div class="montage-caption">|z| &ge; 3 · red-yellow +, blue-lightblue &minus; ·

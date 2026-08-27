@@ -11,6 +11,7 @@ from django.views.decorators.http import require_http_methods
 from melrater.core import charts, selectors, services
 from melrater.core.metrics import OUTLIER_Z, family_of
 from melrater.core.models import Component, Run
+from melrater.core.montage import AXES
 from melrater.core.schemas import ComponentData, RunData
 
 RATING_BUTTONS = [
@@ -18,6 +19,9 @@ RATING_BUTTONS = [
     {"label": "Unknown", "keys": ["2", "u"]},
     {"label": "Noise", "keys": ["3", "n"]},
 ]
+
+AXIS_SESSION_KEY = "montage_axis"
+DEFAULT_AXIS = "axial"
 
 
 def _authed_user(request: HttpRequest) -> AbstractBaseUser:
@@ -140,7 +144,22 @@ def component_detail(request: HttpRequest, run_id: int, index: int) -> HttpRespo
     run = get_object_or_404(Run, pk=run_id)
     component = get_object_or_404(Component, run=run, index=index)
     context = _component_context(run, component, _authed_user(request))
+    axis = request.session.get(AXIS_SESSION_KEY, DEFAULT_AXIS)
+    context["active_axis"] = axis if axis in AXES else DEFAULT_AXIS
     return render(request, "core/component_detail.html", context)
+
+
+@login_required
+@require_http_methods(["POST"])
+def set_axis(request: HttpRequest) -> HttpResponse:
+    """Persist the montage-axis choice so it survives component navigation."""
+    axis = request.POST.get("axis", "")
+    if axis not in AXES:
+        return HttpResponseBadRequest(
+            f"invalid axis: {axis!r}", content_type="text/plain"
+        )
+    request.session[AXIS_SESSION_KEY] = axis
+    return HttpResponse(status=204)
 
 
 @login_required
