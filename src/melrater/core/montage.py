@@ -1,4 +1,9 @@
-"""Slice-montage rendering: thresholded IC z-maps over the mean functional.
+"""Slice-montage rendering: IC z-maps over the mean functional.
+
+Overlays use transparent thresholding ("highlight, don't hide"; Taylor et
+al. 2025, "Go Figure", https://pmc.ncbi.nlm.nih.gov/articles/PMC12036441/):
+nothing is hidden — opacity ramps quadratically with |z| until Z_THRESH,
+above which the overlay is fully opaque.
 
 Volumes are reoriented to closest-canonical (RAS); axial and coronal montages
 display neurological convention (subject L on image left), sagittal shows
@@ -24,8 +29,9 @@ try:
 except ImportError:
     AVIF_OK = bool(pil_features.check("avif"))
 
-Z_THRESH = 3.0  # |z| display threshold for spatial maps
-OVERLAY_VMAX = 10.0
+Z_THRESH = 3.0  # |z| at which the overlay becomes fully opaque
+OVERLAY_VMAX = 10.0  # |z| at which the overlay color saturates
+ALPHA_GAMMA = 2.0  # quadratic opacity ramp below Z_THRESH ("Go Figure")
 UPSCALE = 2  # nearest-neighbour upscale of montage voxels
 MIN_SLICE_COVERAGE = 0.05  # mask fraction for a slice to be shown
 N_LIGHTBOX = 25
@@ -80,19 +86,26 @@ def _overlay_rgb(t: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
 def slice_rgb(
     bg2d: np.ndarray, ov2d: np.ndarray, window: tuple[float, float]
 ) -> np.ndarray:
-    """Composite one 2D slice: grayscale background + opaque thresholded overlay."""
+    """Composite one 2D slice with transparent thresholding.
+
+    The overlay is never hidden: opacity ramps quadratically with |z| up to
+    Z_THRESH, above which it is fully opaque. Color encodes signed magnitude
+    (red-yellow +, blue-lightblue -) saturating at OVERLAY_VMAX.
+    """
     lo, hi = window
     gray = np.clip((bg2d - lo) / (hi - lo), 0.0, 1.0)
-    rgb = np.repeat(gray[..., None], 3, axis=-1)
-    span = OVERLAY_VMAX - Z_THRESH
-    pos = ov2d >= Z_THRESH
-    if pos.any():
-        t = np.clip((ov2d[pos] - Z_THRESH) / span, 0.0, 1.0)
-        rgb[pos] = _overlay_rgb(t, _POS_LO, _POS_HI)
-    neg = ov2d <= -Z_THRESH
-    if neg.any():
-        t = np.clip((-ov2d[neg] - Z_THRESH) / span, 0.0, 1.0)
-        rgb[neg] = _overlay_rgb(t, _NEG_LO, _NEG_HI)
+    background = np.repeat(gray[..., None], 3, axis=-1)
+
+    ov2d = np.nan_to_num(ov2d)  # NaN voxels render as plain background
+    magnitude = np.abs(ov2d)
+    t = np.clip(magnitude / OVERLAY_VMAX, 0.0, 1.0)
+    color = np.empty((*ov2d.shape, 3))
+    pos = ov2d >= 0
+    color[pos] = _overlay_rgb(t[pos], _POS_LO, _POS_HI)
+    color[~pos] = _overlay_rgb(t[~pos], _NEG_LO, _NEG_HI)
+
+    alpha = np.clip(magnitude / Z_THRESH, 0.0, 1.0) ** ALPHA_GAMMA
+    rgb = background * (1.0 - alpha[..., None]) + color * alpha[..., None]
     return (rgb * 255).astype(np.uint8)
 
 

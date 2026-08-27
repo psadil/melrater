@@ -37,7 +37,8 @@
       <img class="montage{% if axis == active_axis %} active{% endif %}" data-axis-img="{{ axis }}"
            src="{{ url }}" alt="{{ axis }} lightbox">
     {% endfor %}
-    <div class="montage-caption">|z| &ge; 3 · red-yellow +, blue-lightblue &minus; ·
+    <div class="montage-caption">unthresholded: opacity &prop; (|z|/3)&sup2;, opaque above |z| = 3 ·
+      red-yellow +, blue-lightblue &minus; (saturating at |z| = 10) ·
       labels are voxel indices · axial/coronal shown neurological (subject L on image left)</div>
   </div>
 

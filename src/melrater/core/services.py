@@ -124,6 +124,26 @@ def ingest_run(*, path: Path, image_workers: int = 0) -> Run:
     return run
 
 
+def rerender_montages(*, run: Run, image_workers: int = 0) -> None:
+    """Re-render an ingested run's montages in place (after a display change).
+
+    Reads the source directory again but leaves the run's rows — and every
+    reviewer's classifications — untouched. The stored montage_format is
+    updated only after rendering succeeds, so a failed render leaves the
+    page serving the still-present old files instead of 404s.
+    """
+    source = melodic.load_source(Path(run.path))
+    _render_montages(run, source, image_workers)
+    fmt = "avif" if montage.AVIF_OK else "png"
+    if run.montage_format != fmt:
+        stale_ext = run.montage_format
+        run.montage_format = fmt
+        run.save(update_fields=["montage_format"])
+        out_dir = Path(settings.MEDIA_ROOT) / "runs" / str(run.pk)
+        for stale in out_dir.glob(f"*.{stale_ext}"):
+            stale.unlink()
+
+
 def _render_montages(run: Run, source: melodic.MelodicSource, workers: int) -> None:
     ica = source.root / "filtered_func_data.ica"
     mean_img = melodic.nib.load(ica / "mean.nii.gz")

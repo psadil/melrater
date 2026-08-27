@@ -1,8 +1,10 @@
 from pathlib import Path
 
 import pytest
+from django.core.management import call_command
+from django.core.management.base import CommandError
 
-from melrater.core import services
+from melrater.core import montage, services
 from melrater.core.models import Classification, Component, Reviewer, Run
 from tests.conftest import N_COMPONENTS, N_TIMEPOINTS, TR
 
@@ -84,6 +86,70 @@ def test_failed_ingest_leaves_no_media(melodic_dir: Path, media_root: Path) -> N
     # Assert
     runs_dir = media_root / "runs"
     assert not runs_dir.exists() or not any(runs_dir.iterdir())
+
+
+def test_rerender_montages_recreates_files(ingested_run: Run, media_root: Path) -> None:
+    # Arrange: wipe the rendered images
+    out_dir = media_root / "runs" / str(ingested_run.pk)
+    for path in out_dir.iterdir():
+        path.unlink()
+
+    # Act
+    call_command("rerender_montages", ingested_run.pk, "--workers", "1")
+
+    # Assert
+    assert len(list(out_dir.iterdir())) == N_COMPONENTS * 3
+
+
+def test_rerender_keeps_format_when_rendering_fails(
+    ingested_run: Run, melodic_dir: Path
+) -> None:
+    # Arrange: remove the montage background so rendering must fail
+    original_format = ingested_run.montage_format
+    (melodic_dir / "filtered_func_data.ica" / "mean.nii.gz").unlink()
+
+    # Act
+    with pytest.raises(FileNotFoundError):
+        services.rerender_montages(run=ingested_run)
+
+    # Assert: the page keeps serving the still-present old files
+    ingested_run.refresh_from_db()
+    assert ingested_run.montage_format == original_format
+
+
+def test_rerender_updates_format_on_codec_change(
+    ingested_run: Run, media_root: Path, monkeypatch
+) -> None:
+    # Arrange: simulate the AVIF codec disappearing
+    monkeypatch.setattr(montage, "AVIF_OK", False)
+
+    # Act
+    services.rerender_montages(run=ingested_run)
+
+    # Assert
+    ingested_run.refresh_from_db()
+    assert ingested_run.montage_format == "png"
+
+
+def test_rerender_removes_stale_extension_files(
+    ingested_run: Run, media_root: Path, monkeypatch
+) -> None:
+    # Arrange
+    original_format = ingested_run.montage_format
+    monkeypatch.setattr(montage, "AVIF_OK", False)
+
+    # Act: codec flip re-renders as png
+    services.rerender_montages(run=ingested_run)
+
+    # Assert: no orphaned files from the previous format remain
+    out_dir = media_root / "runs" / str(ingested_run.pk)
+    assert not list(out_dir.glob(f"*.{original_format}"))
+
+
+def test_rerender_montages_rejects_unknown_run(ingested_run: Run) -> None:
+    # Act / Assert
+    with pytest.raises(CommandError, match="unknown run ids"):
+        call_command("rerender_montages", 999)
 
 
 def test_ingest_run_twice_raises(ingested_run: Run, melodic_dir: Path) -> None:
