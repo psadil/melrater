@@ -7,20 +7,28 @@ version = "0.1.0"
 
 [tasks]
 mockups = "python mockups/generate.py"
+manage = "python manage.py"
+serve = "python manage.py runserver"
 
 [dependencies]
 python = "3.13.*"
 nibabel = ">=5.3"
 numpy = ">=2"
 pillow = ">=11"
+django = ">=5.1"
 
 [pypi-dependencies]
 # conda-forge pillow is not built against libavif; this plugin supplies the codec
 pillow-avif-plugin = "*"
 
+[feature.dev.tasks]
+test = "pytest"
+
 [feature.dev.dependencies]
 ty = "*"
 ruff = "*"
+pytest = ">=8"
+pytest-django = ">=4.9"
 
 [environments]
 dev = ["dev"]
