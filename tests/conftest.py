@@ -64,3 +64,15 @@ def melodic_dir(tmp_path: Path) -> Path:
 def media_root(tmp_path: Path, settings) -> Path:
     settings.MEDIA_ROOT = tmp_path / "media"
     return settings.MEDIA_ROOT
+
+
+@pytest.fixture
+def ingested_run(melodic_dir: Path, media_root: Path):
+    from melrater.core import services
+
+    return services.ingest_run(path=melodic_dir)
+
+
+@pytest.fixture
+def user(django_user_model):
+    return django_user_model.objects.create_user("rater", password="pw")

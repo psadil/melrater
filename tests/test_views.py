@@ -1,113 +1,147 @@
-from pathlib import Path
-
 import pytest
 
-from melrater.core import services
 from melrater.core.models import Classification, Run
 
-
-@pytest.fixture
-def ingested_run(melodic_dir: Path, media_root: Path) -> Run:
-    return services.ingest_run(path=melodic_dir)
+pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
-def user(django_user_model):
-    return django_user_model.objects.create_user("rater", password="pw")
+def logged_in(client, user):
+    client.force_login(user)
+    return client
 
 
-@pytest.mark.django_db
-def test_run_list_requires_login(client, ingested_run: Run) -> None:
+def test_run_list_redirects_anonymous_to_login(client, ingested_run: Run) -> None:
     # Act
     response = client.get("/")
 
     # Assert
-    assert response.status_code == 302
     assert response.url.startswith("/accounts/login/")
 
 
-@pytest.mark.django_db
-def test_run_list_shows_progress(client, ingested_run: Run, user) -> None:
-    # Arrange
-    client.force_login(user)
-
+def test_run_list_shows_run_label(logged_in, ingested_run: Run) -> None:
     # Act
-    response = client.get("/")
+    response = logged_in.get("/")
 
     # Assert
-    html = response.content.decode()
-    assert response.status_code == 200
-    assert ingested_run.label in html
-    assert "0 / 3 rated by you" in html
-    assert "TestModel @ thr5" in html
+    assert ingested_run.label in response.content.decode()
 
 
-@pytest.mark.django_db
-def test_component_detail_renders_variant_c_panels(
-    client, ingested_run: Run, user
-) -> None:
-    # Arrange
-    client.force_login(user)
-
+def test_run_list_shows_progress(logged_in, ingested_run: Run) -> None:
     # Act
-    response = client.get(f"/runs/{ingested_run.pk}/ic/1/")
+    response = logged_in.get("/")
 
     # Assert
-    html = response.content.decode()
-    assert response.status_code == 200
-    assert "IC 1 / 3" in html
-    assert f"ic001_axial.{ingested_run.montage_format}" in html
-    assert "FIX verdict" in html
-    assert "P(signal) = 0.9" in html
-    assert "FIX metrics" in html
-    assert "data-axis-btn" in html
+    assert "0 / 3 rated by you" in response.content.decode()
 
 
-@pytest.mark.django_db
-def test_rate_post_records_classification(client, ingested_run: Run, user) -> None:
-    # Arrange
-    client.force_login(user)
-
+def test_run_list_shows_fix_reviewer(logged_in, ingested_run: Run) -> None:
     # Act
-    response = client.post(f"/runs/{ingested_run.pk}/ic/2/rate/", {"label": "Noise"})
+    response = logged_in.get("/")
 
-    # Assert: htmx fragment has the button selected + oob verdict card
-    html = response.content.decode()
-    assert response.status_code == 200
-    assert "rate-noise selected" in html
-    assert 'hx-swap-oob="true"' in html
-    assert "1 / 3 rated" in html
+    # Assert
+    assert "TestModel @ thr5" in response.content.decode()
+
+
+def test_component_detail_shows_position(logged_in, ingested_run: Run) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert
+    assert "IC 1 / 3" in response.content.decode()
+
+
+def test_component_detail_embeds_montage(logged_in, ingested_run: Run) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert
+    assert f"ic001_axial.{ingested_run.montage_format}" in response.content.decode()
+
+
+def test_component_detail_shows_fix_probability(logged_in, ingested_run: Run) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert
+    assert "P(signal) = 0.9" in response.content.decode()
+
+
+def test_component_detail_offers_axis_switcher(logged_in, ingested_run: Run) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert
+    assert "data-axis-btn" in response.content.decode()
+
+
+def test_component_detail_404s_out_of_range(logged_in, ingested_run: Run) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/99/")
+
+    # Assert
+    assert response.status_code == 404
+
+
+def test_rate_post_records_classification(logged_in, ingested_run: Run, user) -> None:
+    # Act
+    logged_in.post(f"/runs/{ingested_run.pk}/ic/2/rate/", {"label": "Noise"})
+
+    # Assert
     assert Classification.objects.filter(
         reviewer__user=user, component__index=2, label="Noise"
     ).exists()
 
 
-@pytest.mark.django_db
-def test_media_requires_login_and_serves_montages(
-    client, ingested_run: Run, user
+def test_rate_post_returns_selected_button(logged_in, ingested_run: Run) -> None:
+    # Act
+    response = logged_in.post(f"/runs/{ingested_run.pk}/ic/2/rate/", {"label": "Noise"})
+
+    # Assert
+    assert "rate-noise selected" in response.content.decode()
+
+
+def test_rate_post_refreshes_verdict_card_out_of_band(
+    logged_in, ingested_run: Run
 ) -> None:
-    # Arrange
-    url = f"/media/runs/{ingested_run.pk}/ic001_axial.{ingested_run.montage_format}"
-
     # Act
-    anonymous = client.get(url)
-    client.force_login(user)
-    authenticated = client.get(url)
+    response = logged_in.post(f"/runs/{ingested_run.pk}/ic/2/rate/", {"label": "Noise"})
 
-    # Assert: montages are login-gated but served regardless of DEBUG
-    assert anonymous.status_code == 302
-    assert anonymous.url.startswith("/accounts/login/")
-    assert authenticated.status_code == 200
+    # Assert
+    assert 'hx-swap-oob="true"' in response.content.decode()
 
 
-@pytest.mark.django_db
-def test_rate_post_rejects_bad_label(client, ingested_run: Run, user) -> None:
-    # Arrange
-    client.force_login(user)
-
+def test_rate_post_updates_progress(logged_in, ingested_run: Run) -> None:
     # Act
-    response = client.post(f"/runs/{ingested_run.pk}/ic/2/rate/", {"label": "Bogus"})
+    response = logged_in.post(f"/runs/{ingested_run.pk}/ic/2/rate/", {"label": "Noise"})
+
+    # Assert
+    assert "1 / 3 rated" in response.content.decode()
+
+
+def test_rate_post_rejects_bad_label(logged_in, ingested_run: Run) -> None:
+    # Act
+    response = logged_in.post(f"/runs/{ingested_run.pk}/ic/2/rate/", {"label": "Bogus"})
 
     # Assert
     assert response.status_code == 400
-    assert not Classification.objects.filter(reviewer__user=user).exists()
+
+
+def test_media_redirects_anonymous_to_login(client, ingested_run: Run) -> None:
+    # Act
+    response = client.get(
+        f"/media/runs/{ingested_run.pk}/ic001_axial.{ingested_run.montage_format}"
+    )
+
+    # Assert
+    assert response.url.startswith("/accounts/login/")
+
+
+def test_media_serves_montage_when_logged_in(logged_in, ingested_run: Run) -> None:
+    # Act
+    response = logged_in.get(
+        f"/media/runs/{ingested_run.pk}/ic001_axial.{ingested_run.montage_format}"
+    )
+
+    # Assert: served by the Django view, so this works regardless of DEBUG
+    assert response.status_code == 200

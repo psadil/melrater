@@ -13,8 +13,7 @@ def test_axis_picks_spans_mask_coverage() -> None:
     picks = montage.axis_picks(mask, axis=2, n=4)
 
     # Assert
-    assert picks[0] == 2
-    assert picks[-1] == 7
+    assert (picks[0], picks[-1]) == (2, 7)
 
 
 def test_axis_picks_rejects_empty_coverage() -> None:

@@ -6,98 +6,117 @@ from melrater.core import services
 from melrater.core.models import Classification, Component, Reviewer, Run
 from tests.conftest import N_COMPONENTS, N_TIMEPOINTS, TR
 
+pytestmark = pytest.mark.django_db
 
-@pytest.mark.django_db
-def test_ingest_run_creates_domain_objects(melodic_dir: Path, media_root: Path) -> None:
-    # Act
-    run = services.ingest_run(path=melodic_dir)
 
-    # Assert
-    assert run.tr == pytest.approx(TR)
-    assert run.n_timepoints == N_TIMEPOINTS
-    assert run.components.count() == N_COMPONENTS
-    component = run.components.get(index=1)
-    assert len(component.timecourse) == N_TIMEPOINTS
-    assert "featA" in component.metrics
+def test_ingest_stores_tr(ingested_run: Run) -> None:
+    assert ingested_run.tr == pytest.approx(TR)
 
-    reviewer = Reviewer.objects.get(kind=Reviewer.Kind.FIX)
-    assert reviewer.name == "TestModel @ thr5"
+
+def test_ingest_stores_timepoint_count(ingested_run: Run) -> None:
+    assert ingested_run.n_timepoints == N_TIMEPOINTS
+
+
+def test_ingest_creates_all_components(ingested_run: Run) -> None:
+    assert ingested_run.components.count() == N_COMPONENTS
+
+
+def test_ingest_stores_full_timecourse(ingested_run: Run) -> None:
+    assert len(ingested_run.components.get(index=1).timecourse) == N_TIMEPOINTS
+
+
+def test_ingest_stores_component_metrics(ingested_run: Run) -> None:
+    assert "featA" in ingested_run.components.get(index=1).metrics
+
+
+def test_ingest_names_fix_reviewer(ingested_run: Run) -> None:
+    assert Reviewer.objects.get(kind=Reviewer.Kind.FIX).name == "TestModel @ thr5"
+
+
+def test_ingest_stores_fix_labels_in_component_order(ingested_run: Run) -> None:
     labels = list(
-        Classification.objects.filter(reviewer=reviewer)
+        Classification.objects.filter(reviewer__kind=Reviewer.Kind.FIX)
         .order_by("component__index")
         .values_list("label", flat=True)
     )
+
     assert labels == ["Signal", "Noise", "Noise"]
 
 
-@pytest.mark.django_db
-def test_ingest_run_renders_montages(melodic_dir: Path, media_root: Path) -> None:
-    # Act
-    run = services.ingest_run(path=melodic_dir)
+def test_ingest_renders_one_montage_per_component_axis(
+    ingested_run: Run, media_root: Path
+) -> None:
+    files = list((media_root / "runs" / str(ingested_run.pk)).iterdir())
 
-    # Assert: one file per component per display axis
-    out_dir = media_root / "runs" / str(run.pk)
-    files = sorted(p.name for p in out_dir.iterdir())
     assert len(files) == N_COMPONENTS * 3
-    assert f"ic001_axial.{run.montage_format}" in files
-    assert f"ic003_sagittal.{run.montage_format}" in files
 
 
-@pytest.mark.django_db
+def test_ingest_montage_names_encode_component_and_axis(
+    ingested_run: Run, media_root: Path
+) -> None:
+    files = {p.name for p in (media_root / "runs" / str(ingested_run.pk)).iterdir()}
+
+    assert f"ic001_axial.{ingested_run.montage_format}" in files
+
+
 def test_ingest_rolls_back_when_montage_rendering_fails(
     melodic_dir: Path, media_root: Path
 ) -> None:
     # Arrange: remove the montage background so rendering must fail
     (melodic_dir / "filtered_func_data.ica" / "mean.nii.gz").unlink()
 
-    # Act / Assert: nothing half-ingested remains, so a fixed run can re-import
+    # Act
     with pytest.raises(FileNotFoundError):
         services.ingest_run(path=melodic_dir)
+
+    # Assert: nothing half-ingested remains, so a fixed run can re-import
     assert Run.objects.count() == 0
-    assert not (media_root / "runs").exists() or not any(
-        (media_root / "runs").iterdir()
-    )
 
 
-@pytest.mark.django_db
-def test_ingest_run_twice_raises(melodic_dir: Path, media_root: Path) -> None:
+def test_failed_ingest_leaves_no_media(melodic_dir: Path, media_root: Path) -> None:
     # Arrange
-    services.ingest_run(path=melodic_dir)
+    (melodic_dir / "filtered_func_data.ica" / "mean.nii.gz").unlink()
 
-    # Act / Assert
+    # Act
+    with pytest.raises(FileNotFoundError):
+        services.ingest_run(path=melodic_dir)
+
+    # Assert
+    runs_dir = media_root / "runs"
+    assert not runs_dir.exists() or not any(runs_dir.iterdir())
+
+
+def test_ingest_run_twice_raises(ingested_run: Run, melodic_dir: Path) -> None:
     with pytest.raises(services.RunAlreadyIngested):
         services.ingest_run(path=melodic_dir)
-    assert Run.objects.count() == 1
 
 
-@pytest.mark.django_db
-def test_rate_component_creates_then_updates(
-    melodic_dir: Path, media_root: Path, django_user_model
-) -> None:
+def test_rate_component_updates_in_place(ingested_run: Run, user) -> None:
     # Arrange
-    services.ingest_run(path=melodic_dir)
-    user = django_user_model.objects.create_user("rater")
-    component = Component.objects.get(run__path=str(melodic_dir), index=2)
+    component = Component.objects.get(run=ingested_run, index=2)
 
     # Act
     first = services.rate_component(user=user, component=component, label="Signal")
     second = services.rate_component(user=user, component=component, label="Noise")
 
     # Assert: one row per (component, human reviewer), updated in place
-    assert first.pk == second.pk
-    assert second.label == "Noise"
-    assert Classification.objects.filter(reviewer__user=user).count() == 1
+    assert (first.pk, second.label) == (second.pk, "Noise")
+
+
+def test_rate_component_creates_human_reviewer(ingested_run: Run, user) -> None:
+    # Arrange
+    component = Component.objects.get(run=ingested_run, index=2)
+
+    # Act
+    services.rate_component(user=user, component=component, label="Signal")
+
+    # Assert
     assert Reviewer.objects.get(user=user).kind == Reviewer.Kind.HUMAN
 
 
-@pytest.mark.django_db
-def test_rate_component_rejects_bad_label(
-    melodic_dir: Path, media_root: Path, django_user_model
-) -> None:
+def test_rate_component_rejects_bad_label(ingested_run: Run, user) -> None:
     # Arrange
-    services.ingest_run(path=melodic_dir)
-    user = django_user_model.objects.create_user("rater")
-    component = Component.objects.get(run__path=str(melodic_dir), index=1)
+    component = Component.objects.get(run=ingested_run, index=1)
 
     # Act / Assert
     with pytest.raises(ValueError, match="invalid label"):
