@@ -11,6 +11,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from melrater.core.schemas import MetricStat, MetricStats, MetricValue
+
 OUTLIER_Z = 3.0  # |robust z| above which a metric counts as an outlier
 
 
@@ -42,29 +44,29 @@ def family_of(name: str) -> str:
     return name.split(":")[0]
 
 
-def metric_stats_payload(table: MetricTable, signal_rows: list[int]) -> dict:
-    """Run-level JSON payload: per-metric distribution bands and the robust-z
-    positions of the FIX-labeled Signal components (the glyphs' green ticks)."""
+def compute_metric_stats(table: MetricTable, signal_rows: list[int]) -> MetricStats:
+    """Per-metric distribution bands and the robust-z positions of the
+    FIX-labeled Signal components (the glyphs' green ticks)."""
     p5, p25, p75, p95 = np.percentile(table.z, (5, 25, 75, 95), axis=0)
-    return {
-        "names": table.names,
-        "dropped": table.dropped,
-        "stats": {
-            name: {
-                "p5": float(p5[j]),
-                "p25": float(p25[j]),
-                "p75": float(p75[j]),
-                "p95": float(p95[j]),
-                "signal_z": [float(table.z[i, j]) for i in signal_rows],
-            }
+    return MetricStats(
+        names=table.names,
+        dropped=table.dropped,
+        stats={
+            name: MetricStat(
+                p5=float(p5[j]),
+                p25=float(p25[j]),
+                p75=float(p75[j]),
+                p95=float(p95[j]),
+                signal_z=[float(table.z[i, j]) for i in signal_rows],
+            )
             for j, name in enumerate(table.names)
         },
-    }
+    )
 
 
-def component_metrics_payload(table: MetricTable, row: int) -> dict:
-    """Per-component JSON payload: raw value and robust z for each metric."""
+def compute_component_metrics(table: MetricTable, row: int) -> dict[str, MetricValue]:
+    """Raw value and robust z for each of one component's metrics."""
     return {
-        name: {"raw": float(table.raw[row, j]), "z": float(table.z[row, j])}
+        name: MetricValue(raw=float(table.raw[row, j]), z=float(table.z[row, j]))
         for j, name in enumerate(table.names)
     }

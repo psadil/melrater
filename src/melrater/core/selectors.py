@@ -9,6 +9,17 @@ from django.contrib.auth.models import AbstractBaseUser
 
 from melrater.core.charts import ProbEntry
 from melrater.core.models import Classification, Component, Reviewer, Run
+from melrater.core.schemas import ComponentData, RunData
+
+
+def run_data(run: Run) -> RunData:
+    """Typed projection of a Run row (validates the stored JSON payloads)."""
+    return RunData.model_validate(run)
+
+
+def component_data(component: Component) -> ComponentData:
+    """Typed projection of a Component row."""
+    return ComponentData.model_validate(component)
 
 
 @dataclass(frozen=True)

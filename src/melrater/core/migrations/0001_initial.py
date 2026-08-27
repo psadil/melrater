@@ -8,11 +8,9 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
     initial = True
 
-    dependencies = [
-        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
-    ]
+    dependencies = (migrations.swappable_dependency(settings.AUTH_USER_MODEL),)
 
-    operations = [
+    operations = (
         migrations.CreateModel(
             name="Run",
             fields=[
@@ -190,4 +188,4 @@ class Migration(migrations.Migration):
                 fields=("run", "index"), name="unique_component_per_run"
             ),
         ),
-    ]
+    )

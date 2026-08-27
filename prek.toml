@@ -35,7 +35,7 @@ repo = "https://github.com/codespell-project/codespell"
 rev = "v2.4.1"
 # Generated lock files and vendored minified JS aren't prose; skip them
 # (they trip codespell on tokens that look like typos).
-hooks = [{ id = "codespell", exclude = '(\.lock$|^static/vendor/)' }]
+hooks = [{ id = "codespell", exclude = '(\.lock$|^src/static/vendor/)' }]
 
 # Enforce Conventional Commits (https://www.conventionalcommits.org) on every
 # commit message. Runs at the commit-msg stage, so it needs the commit-msg shim

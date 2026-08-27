@@ -80,7 +80,7 @@ def ingest_run(*, path: Path, image_workers: int = 0) -> Run:
             n_timepoints=source.n_timepoints,
             fd=[float(v) for v in source.fd],
             frequencies=[float(v) for v in source.frequencies],
-            metric_stats=metrics.metric_stats_payload(table, signal_rows),
+            metric_stats=metrics.compute_metric_stats(table, signal_rows).model_dump(),
             montage_format="avif" if montage.AVIF_OK else "png",
         )
         components = Component.objects.bulk_create(
@@ -91,7 +91,12 @@ def ingest_run(*, path: Path, image_workers: int = 0) -> Run:
                 total_var=float(source.icstats[i, 1]),
                 timecourse=[float(v) for v in source.mix[:, i]],
                 spectrum=[float(v) for v in source.ftmix[:, i]],
-                metrics=metrics.component_metrics_payload(table, i),
+                metrics={
+                    name: value.model_dump()
+                    for name, value in metrics.compute_component_metrics(
+                        table, i
+                    ).items()
+                },
             )
             for i in range(source.n_components)
         )

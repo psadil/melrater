@@ -2,9 +2,6 @@
 .pixi/*
 !.pixi/config.toml
 
-# generated mockups embed subject-derived brain images; keep them out of history
-mockups/*.html
-
 __pycache__/
 *.py[cod]
 .pytest_cache/
