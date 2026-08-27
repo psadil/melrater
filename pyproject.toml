@@ -6,7 +6,7 @@ addopts = "-q -m 'not e2e'"
 markers = ["e2e: browser tests via playwright (run with: pixi run -e dev test-e2e)"]
 
 [tool.ty.src]
-include = ["src", "tests", "manage.py"]
+include = ["src", "tests"]
 
 [tool.ty.environment]
 root = ["./src", "."]

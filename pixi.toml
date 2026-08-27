@@ -5,9 +5,16 @@ name = "melrater"
 platforms = ["osx-arm64"]
 version = "0.1.0"
 
+# applies to every task and pixi shell: puts the src/ layout on the import
+# path and points Django at its settings, so no manage.py shim is needed
+# (pixi run manage == python -m django)
+[activation.env]
+PYTHONPATH = "$PIXI_PROJECT_ROOT/src"
+DJANGO_SETTINGS_MODULE = "config.settings"
+
 [tasks]
-manage = "python manage.py"
-collectstatic = "python manage.py collectstatic --noinput"
+manage = "python -m django"
+collectstatic = "python -m django collectstatic --noinput"
 # async server: granian on uvloop; Django implements no lifespan protocol, so
 # the interface is asginl, and granian serves the collected static files itself
 serve = { cmd = [
@@ -30,7 +37,7 @@ serve = { cmd = [
     "/static",
     "--static-path-mount",
     "staticfiles",
-], env = { PYTHONPATH = "src" }, depends-on = ["collectstatic"] }
+], depends-on = ["collectstatic"] }
 
 [dependencies]
 python = "3.13.*"

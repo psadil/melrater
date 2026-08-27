@@ -1,10 +1,10 @@
-"""ASGI config for melrater."""
+"""ASGI config for melrater (granian's entrypoint — see the serve task).
+
+Importable only with src/ on the import path; pixi's activation.env
+provides that (and DJANGO_SETTINGS_MODULE) for every task.
+"""
 
 import os
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from django.core.asgi import get_asgi_application
 
