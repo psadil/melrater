@@ -32,7 +32,17 @@ pixi run -e dev ty check
   [HackSoft Django StyleGuide](https://github.com/HackSoftware/Django-Styleguide):
   writes in `services.py`, reads in `selectors.py`, views stay thin.
   Domain logic (`melodic.py`, `metrics.py`, `montage.py`, `charts.py`) is
-  Django-free and fully typed.
+  Django-free and fully typed. `lake.py` is the one module that talks to a
+  [bidslake](https://github.com/psadil/bidslake) catalog — it resolves which
+  files belong to which run and hands `melodic.py` plain paths/arrays; a role
+  that resolves to anything but exactly one file is reported, never guessed.
+  `_lake_models.py` is generated (`pixi run regen-lake-models <catalog>`) so
+  queries type-check against the feat adapter's vocabulary — regenerate it,
+  don't edit it.
+- **Management commands** are
+  [django-typer](https://django-typer.readthedocs.io) `TyperCommand`s:
+  options come from the annotated `handle` signature, the docstring is the
+  help text, and validation raises `typer.BadParameter`.
 - **Typing**: checked by ty with no rule overrides. django-stubs (PEP 561
   stubs only, no mypy plugin; dev env) resolves managers, field descriptor
   values, and `request.user`; reverse FK accessors are declared as stub-only

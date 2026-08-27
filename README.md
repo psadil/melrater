@@ -31,15 +31,28 @@ Enable the git hooks (ruff, ty, codespell, Conventional Commits) once:
 prek install
 ```
 
-## Ingest a run
+## Ingest runs
 
-Point `import_run` at a MELODIC+pyFIX derivatives directory (containing
-`filtered_func_data.ica/`, `mc/prefiltered_func_data_mcf.par`,
-`fix/features.csv`, and `fix4melview_<MODEL>_thr<N>.txt`):
+Ingestion reads a [bidslake](https://github.com/psadil/bidslake) catalog
+rather than walking directories — build one over your MELODIC+pyFIX
+derivatives with the bidslake CLI (the `feat` adapter teaches it FSL's
+layout, and handles trees spread across many roots):
 
 ```sh
-pixi run manage import_run /path/to/sub-XX_..._desc-preproc_bold
+bidslake index -i /path/to/derivatives --adapter feat -o study.duckdb
 ```
+
+then hand the catalog to `import_run`:
+
+```sh
+pixi run manage import_run study.duckdb
+```
+
+Every MELODIC run the catalog knows is ingested (the motion parameters come
+straight from the catalog's `feat_motion` table). Already-ingested runs are
+skipped, and a run with missing or ambiguous inputs is reported and skipped
+rather than guessed at. `--sub/--ses/--task/--run` narrow the import;
+`--base-dir` rebases the catalog's roots when the data moved after indexing.
 
 Montage rendering parallelizes across `--workers` processes (default:
 CPUs − 2; a 96-component run takes a few seconds).

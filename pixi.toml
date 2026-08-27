@@ -15,6 +15,10 @@ DJANGO_SETTINGS_MODULE = "config.settings"
 [tasks]
 manage = "python -m django"
 collectstatic = "python -m django collectstatic --noinput"
+# Refresh the typed catalog vocabulary (melrater/core/_lake_models.py) from a
+# feat-adapter catalog, after re-indexing or a bidslake bump:
+#   pixi run regen-lake-models path/to/study.duckdb
+regen-lake-models = "python -m bidslake.stubgen --out src/melrater/core/_lake_models.py"
 # async server: granian on uvloop; Django implements no lifespan protocol, so
 # the interface is asginl, and granian serves the collected static files itself
 serve = { cmd = [
@@ -40,7 +44,8 @@ serve = { cmd = [
 ], depends-on = ["collectstatic"] }
 
 [dependencies]
-python = "3.13.*"
+# 3.14 is bidslake's floor; everything else moved up with it
+python = "3.14.*"
 nibabel = ">=5.3"
 numpy = ">=2"
 pillow = ">=11"
@@ -48,10 +53,22 @@ django = ">=6"
 pydantic = ">=2"
 granian = ">=2.6"
 uvloop = ">=0.22"
+# build toolchain for the bidslake pypi dependency (a PyO3/maturin extension,
+# compiled at install time)
+rust = "*"
+maturin = ">=1.7,<2"
 
 [pypi-dependencies]
 # conda-forge pillow is not built against libavif; this plugin supplies the codec
 pillow-avif-plugin = "*"
+django-typer = "*"
+# bidslake query layer: typed access to the catalog `import_run` reads. Points at
+# the sibling checkout while the feat-adapter additions melrater needs (the
+# `spectrum`/`metrics` suffixes and the melodic_ftmix/melodic_icstats/
+# melodic_mean/fix_features roles) live on its feat/melodic-rating-slots branch;
+# once that lands upstream, pin a git rev instead (dirt-style):
+#   bidslake = { git = "https://github.com/psadil/bidslake.git", rev = "<sha>", subdirectory = "crates/bidslake-py" }
+bidslake = { path = "../bidslake/crates/bidslake-py" }
 
 [feature.dev.tasks]
 test = "pytest"

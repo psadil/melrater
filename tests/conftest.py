@@ -32,6 +32,7 @@ def melodic_dir(tmp_path: Path) -> Path:
     mean = (100 + rng.normal(size=SHAPE)).astype("float32")
     nib.nifti1.Nifti1Image(mean, affine).to_filename(ica / "mean.nii.gz")
     mask = np.ones(SHAPE, dtype="float32")
+    nib.nifti1.Nifti1Image(mask, affine).to_filename(root / "mask.nii.gz")
     nib.nifti1.Nifti1Image(mask, affine).to_filename(ica / "mask.nii.gz")
     ic = (rng.normal(size=(*SHAPE, N_COMPONENTS)) * 4).astype("float32")
     nib.nifti1.Nifti1Image(ic, affine).to_filename(ica / "melodic_IC.nii.gz")
@@ -60,6 +61,32 @@ def melodic_dir(tmp_path: Path) -> Path:
     return root
 
 
+def run_inputs(root: Path):
+    """The RunInputs a catalog would resolve for the synthetic directory.
+
+    A plain factory rather than a fixture so tests can point individual
+    entries elsewhere; motion comes from the .par exactly as the catalog's
+    feat_motion table would hold it.
+    """
+    from melrater.core import melodic
+
+    ica = root / "filtered_func_data.ica"
+    return melodic.RunInputs(
+        root=root,
+        label=root.name,
+        bold=root / "filtered_func_data.nii.gz",
+        mix=ica / "melodic_mix",
+        ftmix=ica / "melodic_FTmix",
+        icstats=ica / "melodic_ICstats",
+        features=root / "fix" / "features.csv",
+        ic=ica / "melodic_IC.nii.gz",
+        mean=ica / "mean.nii.gz",
+        mask=root / "mask.nii.gz",
+        classifications=(root / "fix4melview_TestModel_thr5.txt",),
+        motion=np.loadtxt(root / "mc" / "prefiltered_func_data_mcf.par"),
+    )
+
+
 @pytest.fixture
 def media_root(tmp_path: Path, settings) -> Path:
     settings.MEDIA_ROOT = tmp_path / "media"
@@ -68,9 +95,9 @@ def media_root(tmp_path: Path, settings) -> Path:
 
 @pytest.fixture
 def ingested_run(melodic_dir: Path, media_root: Path):
-    from melrater.core import services
+    from melrater.core import melodic, services
 
-    return services.ingest_run(path=melodic_dir)
+    return services.ingest_run(source=melodic.load_run(run_inputs(melodic_dir)))
 
 
 @pytest.fixture

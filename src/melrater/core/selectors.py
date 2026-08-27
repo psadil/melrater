@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser
@@ -10,6 +11,11 @@ from django.contrib.auth.models import AbstractBaseUser
 from melrater.core.charts import ProbEntry
 from melrater.core.models import Classification, Component, Reviewer, Run
 from melrater.core.schemas import ComponentData, RunData
+
+
+def run_ingested(root: Path) -> bool:
+    """Whether the run rooted at ``root`` is already in the database."""
+    return Run.objects.filter(path=str(root.resolve())).exists()
 
 
 def run_data(run: Run) -> RunData:

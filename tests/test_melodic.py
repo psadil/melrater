@@ -1,36 +1,44 @@
+import dataclasses
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 from melrater.core import melodic
-from tests.conftest import FD_STEP, N_BINS, N_COMPONENTS, N_TIMEPOINTS, TR
+from tests.conftest import (
+    FD_STEP,
+    N_BINS,
+    N_COMPONENTS,
+    N_TIMEPOINTS,
+    TR,
+    run_inputs,
+)
 
 
 @pytest.fixture
 def source(melodic_dir: Path) -> melodic.MelodicSource:
-    return melodic.load_source(melodic_dir)
+    return melodic.load_run(run_inputs(melodic_dir))
 
 
-def test_load_source_reads_tr(source: melodic.MelodicSource) -> None:
+def test_load_run_reads_tr(source: melodic.MelodicSource) -> None:
     assert source.tr == pytest.approx(TR)
 
 
-def test_load_source_labels_run_after_directory(
+def test_load_run_labels_run_after_directory(
     source: melodic.MelodicSource, melodic_dir: Path
 ) -> None:
     assert source.label == melodic_dir.name
 
 
-def test_load_source_mix_shape(source: melodic.MelodicSource) -> None:
+def test_load_run_mix_shape(source: melodic.MelodicSource) -> None:
     assert source.mix.shape == (N_TIMEPOINTS, N_COMPONENTS)
 
 
-def test_load_source_ftmix_shape(source: melodic.MelodicSource) -> None:
+def test_load_run_ftmix_shape(source: melodic.MelodicSource) -> None:
     assert source.ftmix.shape == (N_BINS, N_COMPONENTS)
 
 
-def test_load_source_counts_components(source: melodic.MelodicSource) -> None:
+def test_load_run_counts_components(source: melodic.MelodicSource) -> None:
     assert source.n_components == N_COMPONENTS
 
 
@@ -40,26 +48,29 @@ def test_frequency_axis_ends_at_nyquist(source: melodic.MelodicSource) -> None:
 
 
 def test_fd_has_one_value_per_timepoint(melodic_dir: Path) -> None:
+    # Arrange
+    params = np.loadtxt(melodic_dir / "mc" / "prefiltered_func_data_mcf.par")
+
     # Act
-    fd = melodic.load_fd(melodic_dir)
+    fd = melodic.fd_power(params)
 
     # Assert
     assert len(fd) == N_TIMEPOINTS
 
 
 def test_fd_starts_at_zero(melodic_dir: Path) -> None:
-    # Act
-    fd = melodic.load_fd(melodic_dir)
+    params = np.loadtxt(melodic_dir / "mc" / "prefiltered_func_data_mcf.par")
 
-    # Assert
+    fd = melodic.fd_power(params)
+
     assert fd[0] == 0.0
 
 
 def test_fd_equals_translation_ramp_step(melodic_dir: Path) -> None:
-    # Act
-    fd = melodic.load_fd(melodic_dir)
+    params = np.loadtxt(melodic_dir / "mc" / "prefiltered_func_data_mcf.par")
 
-    # Assert
+    fd = melodic.fd_power(params)
+
     assert np.allclose(fd[1:], FD_STEP)
 
 
@@ -107,7 +118,7 @@ def test_parse_fix_file_rejects_renumbered_lines(melodic_dir: Path) -> None:
         melodic.parse_fix_file(fix_file)
 
 
-def test_load_source_rejects_component_mismatch(melodic_dir: Path) -> None:
+def test_load_run_rejects_component_mismatch(melodic_dir: Path) -> None:
     # Arrange: drop the last verdict row
     fix_file = melodic_dir / "fix4melview_TestModel_thr5.txt"
     lines = fix_file.read_text().splitlines()
@@ -115,4 +126,14 @@ def test_load_source_rejects_component_mismatch(melodic_dir: Path) -> None:
 
     # Act / Assert
     with pytest.raises(ValueError, match="verdicts"):
-        melodic.load_source(melodic_dir)
+        melodic.load_run(run_inputs(melodic_dir))
+
+
+def test_load_run_rejects_motion_volume_mismatch(melodic_dir: Path) -> None:
+    # Arrange: one motion row too few for the mix's volumes
+    inputs = run_inputs(melodic_dir)
+    short = dataclasses.replace(inputs, motion=inputs.motion[:-1])
+
+    # Act / Assert
+    with pytest.raises(ValueError, match="motion rows"):
+        melodic.load_run(short)

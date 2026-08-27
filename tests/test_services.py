@@ -4,9 +4,9 @@ import pytest
 from django.core.management import call_command
 from django.core.management.base import CommandError
 
-from melrater.core import montage, services
+from melrater.core import melodic, montage, services
 from melrater.core.models import Classification, Component, Reviewer, Run
-from tests.conftest import N_COMPONENTS, N_TIMEPOINTS, TR
+from tests.conftest import N_COMPONENTS, N_TIMEPOINTS, TR, run_inputs
 
 pytestmark = pytest.mark.django_db
 
@@ -69,7 +69,7 @@ def test_ingest_rolls_back_when_montage_rendering_fails(
 
     # Act
     with pytest.raises(FileNotFoundError):
-        services.ingest_run(path=melodic_dir)
+        services.ingest_run(source=melodic.load_run(run_inputs(melodic_dir)))
 
     # Assert: nothing half-ingested remains, so a fixed run can re-import
     assert Run.objects.count() == 0
@@ -81,7 +81,7 @@ def test_failed_ingest_leaves_no_media(melodic_dir: Path, media_root: Path) -> N
 
     # Act
     with pytest.raises(FileNotFoundError):
-        services.ingest_run(path=melodic_dir)
+        services.ingest_run(source=melodic.load_run(run_inputs(melodic_dir)))
 
     # Assert
     runs_dir = media_root / "runs"
@@ -154,7 +154,7 @@ def test_rerender_montages_rejects_unknown_run(ingested_run: Run) -> None:
 
 def test_ingest_run_twice_raises(ingested_run: Run, melodic_dir: Path) -> None:
     with pytest.raises(services.RunAlreadyIngested):
-        services.ingest_run(path=melodic_dir)
+        services.ingest_run(source=melodic.load_run(run_inputs(melodic_dir)))
 
 
 def test_rate_component_updates_in_place(ingested_run: Run, user) -> None:

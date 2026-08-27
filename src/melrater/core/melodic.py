@@ -1,8 +1,10 @@
-"""Readers for a MELODIC+pyFIX derivatives directory.
+"""Readers for MELODIC+pyFIX derivative files.
 
-Pure functions over the on-disk layout produced by FSL MELODIC and pyFIX,
-e.g. sub-XX_..._desc-preproc_bold/ containing filtered_func_data.ica/,
-mc/prefiltered_func_data_mcf.par, fix/features.csv and fix4melview_*.txt.
+Pure functions over the individual files FSL MELODIC and pyFIX write
+(melodic_mix, melodic_FTmix, fix4melview_*.txt, ...). Which files belong to
+which run is the catalog's business (see lake.py): everything here takes
+explicit paths — collected in :class:`RunInputs` — and turns them into one
+loaded :class:`MelodicSource`.
 """
 
 from __future__ import annotations
@@ -36,8 +38,31 @@ class FixResult:
 
 
 @dataclass(frozen=True)
+class RunInputs:
+    """One run's resolved inputs: local paths, plus the catalog-read motion.
+
+    The motion parameters arrive as an array rather than a path because the
+    catalog ingests the ``.par`` file into its ``feat_motion`` table — there
+    is no file left to parse, only rows to read (see lake.py).
+    """
+
+    root: Path  # the run directory itself (stored as Run.path)
+    label: str
+    bold: Path  # filtered_func_data.nii.gz — the TR comes from its header
+    mix: Path
+    ftmix: Path
+    icstats: Path
+    features: Path  # fix/features.csv
+    ic: Path  # melodic_IC.nii.gz
+    mean: Path  # the montage background
+    mask: Path  # the montage slice-picking mask
+    classifications: tuple[Path, ...]  # fix4melview_*_thr*.txt
+    motion: np.ndarray  # (n_timepoints, 6) mcflirt order: 3 rot (rad), 3 trans (mm)
+
+
+@dataclass(frozen=True)
 class MelodicSource:
-    """Everything melrater needs from one derivatives directory."""
+    """Everything melrater needs from one run, loaded."""
 
     root: Path
     label: str
@@ -50,6 +75,9 @@ class MelodicSource:
     feature_names: list[str]
     features: np.ndarray  # (n_components, n_features)
     fix_results: list[FixResult]
+    ic_path: Path  # montage inputs, opened only at render time
+    mean_path: Path
+    mask_path: Path
 
     @property
     def n_components(self) -> int:
@@ -60,28 +88,27 @@ class MelodicSource:
         return int(self.mix.shape[0])
 
 
-def load_tr(root: Path) -> float:
-    header = nib.load(root / "filtered_func_data.nii.gz").header
+def load_tr(bold: Path) -> float:
+    header = nib.load(bold).header
     assert isinstance(header, nib.nifti1.Nifti1Header)
     return float(header["pixdim"][4])
 
 
-def load_fd(root: Path) -> np.ndarray:
-    """Power's framewise displacement from an FSL mcflirt .par file.
+def fd_power(params: np.ndarray) -> np.ndarray:
+    """Power's framewise displacement from mcflirt motion parameters.
 
     mcflirt columns are 3 rotations (radians) then 3 translations (mm);
     FD = sum|dtrans| + 50mm * sum|drot|, with 0 prepended for the first frame.
     """
-    par = np.loadtxt(root / "mc" / "prefiltered_func_data_mcf.par")
-    rot, trans = par[:, :3], par[:, 3:]
+    rot, trans = params[:, :3], params[:, 3:]
     fd = np.abs(np.diff(trans, axis=0)).sum(axis=1) + 50.0 * np.abs(
         np.diff(rot, axis=0)
     ).sum(axis=1)
     return np.concatenate([[0.0], fd])
 
 
-def load_features(root: Path) -> tuple[list[str], np.ndarray]:
-    with open(root / "fix" / "features.csv") as f:
+def load_features(path: Path) -> tuple[list[str], np.ndarray]:
+    with open(path) as f:
         reader = csv.reader(f)
         names = next(reader)
         rows = [[float(v) for v in row] for row in reader if row]
@@ -110,31 +137,34 @@ def parse_fix_file(path: Path) -> FixResult:
     )
 
 
-def load_fix_results(root: Path) -> list[FixResult]:
-    return [parse_fix_file(p) for p in sorted(root.glob("fix4melview_*_thr*.txt"))]
-
-
-def load_source(root: Path) -> MelodicSource:
-    root = root.resolve()
-    ica = root / "filtered_func_data.ica"
-    tr = load_tr(root)
-    mix = np.loadtxt(ica / "melodic_mix")
-    ftmix = np.loadtxt(ica / "melodic_FTmix")
-    icstats = np.loadtxt(ica / "melodic_ICstats")
+def load_run(inputs: RunInputs) -> MelodicSource:
+    mix = np.loadtxt(inputs.mix)
+    ftmix = np.loadtxt(inputs.ftmix)
+    icstats = np.loadtxt(inputs.icstats)
     if mix.shape[1] != ftmix.shape[1] or mix.shape[1] != icstats.shape[0]:
         raise ValueError(
-            f"inconsistent component counts in {ica}: "
+            f"inconsistent component counts in {inputs.label}: "
             f"mix {mix.shape}, FTmix {ftmix.shape}, ICstats {icstats.shape}"
         )
+    if inputs.motion.shape[0] != mix.shape[0]:
+        raise ValueError(
+            f"{inputs.label}: {inputs.motion.shape[0]} motion rows "
+            f"for {mix.shape[0]} volumes"
+        )
+    tr = load_tr(inputs.bold)
     # FTmix rows are the positive-frequency bins of a zero-padded FFT of length
     # 2*n_bins, DC dropped — the last bin sits exactly at Nyquist.
     frequencies = np.arange(1, ftmix.shape[0] + 1) / (2 * ftmix.shape[0] * tr)
-    feature_names, features = load_features(root)
+    feature_names, features = load_features(inputs.features)
     if features.shape[0] != mix.shape[1]:
         raise ValueError(
-            f"features.csv has {features.shape[0]} rows for {mix.shape[1]} components"
+            f"{inputs.features.name} has {features.shape[0]} rows "
+            f"for {mix.shape[1]} components"
         )
-    fix_results = load_fix_results(root)
+    # filename order, so the (alphabetically) first model stays the primary one
+    fix_results = [
+        parse_fix_file(p) for p in sorted(inputs.classifications, key=lambda p: p.name)
+    ]
     for result in fix_results:
         if len(result.verdicts) != mix.shape[1]:
             raise ValueError(
@@ -142,15 +172,18 @@ def load_source(root: Path) -> MelodicSource:
                 f"for {mix.shape[1]} components"
             )
     return MelodicSource(
-        root=root,
-        label=root.name,
+        root=inputs.root,
+        label=inputs.label,
         tr=tr,
         mix=mix,
         ftmix=ftmix,
         icstats=icstats,
-        fd=load_fd(root),
+        fd=fd_power(inputs.motion),
         frequencies=frequencies,
         feature_names=feature_names,
         features=features,
         fix_results=fix_results,
+        ic_path=inputs.ic,
+        mean_path=inputs.mean,
+        mask_path=inputs.mask,
     )

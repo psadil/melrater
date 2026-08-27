@@ -1,3 +1,8 @@
+[tool.ruff]
+# stubgen-generated catalog vocabulary (see `pixi run regen-lake-models`):
+# regenerated verbatim, so neither linted nor reformatted
+extend-exclude = ["src/melrater/core/_lake_models.py"]
+
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"
 pythonpath = ["src"]

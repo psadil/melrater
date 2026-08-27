@@ -9,7 +9,7 @@ from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import transaction
 
-from melrater.core import melodic, metrics, montage
+from melrater.core import lake, melodic, metrics, montage
 from melrater.core.models import Classification, Component, Reviewer, Run
 
 
@@ -49,17 +49,16 @@ def _fix_reviewer(result: melodic.FixResult) -> Reviewer:
     return reviewer
 
 
-def ingest_run(*, path: Path, image_workers: int = 0) -> Run:
-    """Ingest one MELODIC+pyFIX derivatives directory.
+def ingest_run(*, source: melodic.MelodicSource, image_workers: int = 0) -> Run:
+    """Ingest one loaded MELODIC+pyFIX run (see lake.discover_runs).
 
     Creates the Run, its Components with chart payloads, one FIX Reviewer +
     Classifications per fix4melview file, and renders the slice montages
     into MEDIA_ROOT/runs/<id>/.
     """
-    path = path.resolve()
+    path = source.root.resolve()
     if Run.objects.filter(path=str(path)).exists():
         raise RunAlreadyIngested(str(path))
-    source = melodic.load_source(path)
     table = metrics.build_metric_table(source.feature_names, source.features)
 
     # the (alphabetically) first FIX result defines the Signal ticks shown on
@@ -115,7 +114,14 @@ def ingest_run(*, path: Path, image_workers: int = 0) -> Run:
         # inside the transaction so a render failure rolls the run back
         # instead of leaving a half-ingested run that blocks re-import
         try:
-            _render_montages(run, source, image_workers)
+            _render_montages(
+                run,
+                ic_path=source.ic_path,
+                mean_path=source.mean_path,
+                mask_path=source.mask_path,
+                n_components=source.n_components,
+                workers=image_workers,
+            )
         except Exception:
             shutil.rmtree(
                 Path(settings.MEDIA_ROOT) / "runs" / str(run.pk), ignore_errors=True
@@ -127,13 +133,21 @@ def ingest_run(*, path: Path, image_workers: int = 0) -> Run:
 def rerender_montages(*, run: Run, image_workers: int = 0) -> None:
     """Re-render an ingested run's montages in place (after a display change).
 
-    Reads the source directory again but leaves the run's rows — and every
-    reviewer's classifications — untouched. The stored montage_format is
-    updated only after rendering succeeds, so a failed render leaves the
-    page serving the still-present old files instead of 404s.
+    Reads the run directory's images again (named by the feat layout) but
+    leaves the run's rows — and every reviewer's classifications — untouched.
+    The stored montage_format is updated only after rendering succeeds, so a
+    failed render leaves the page serving the still-present old files instead
+    of 404s.
     """
-    source = melodic.load_source(Path(run.path))
-    _render_montages(run, source, image_workers)
+    ic_path, mean_path, mask_path = lake.run_montage_paths(Path(run.path))
+    _render_montages(
+        run,
+        ic_path=ic_path,
+        mean_path=mean_path,
+        mask_path=mask_path,
+        n_components=run.components.count(),
+        workers=image_workers,
+    )
     fmt = "avif" if montage.AVIF_OK else "png"
     if run.montage_format != fmt:
         stale_ext = run.montage_format
@@ -144,10 +158,17 @@ def rerender_montages(*, run: Run, image_workers: int = 0) -> None:
             stale.unlink()
 
 
-def _render_montages(run: Run, source: melodic.MelodicSource, workers: int) -> None:
-    ica = source.root / "filtered_func_data.ica"
-    mean_img = melodic.nib.load(ica / "mean.nii.gz")
-    mask_img = melodic.nib.load(ica / "mask.nii.gz")
+def _render_montages(
+    run: Run,
+    *,
+    ic_path: Path,
+    mean_path: Path,
+    mask_path: Path,
+    n_components: int,
+    workers: int,
+) -> None:
+    mean_img = melodic.nib.load(mean_path)
+    mask_img = melodic.nib.load(mask_path)
     assert isinstance(mean_img, melodic.nib.nifti1.Nifti1Image)
     assert isinstance(mask_img, melodic.nib.nifti1.Nifti1Image)
     bg = montage.canonical_vol(mean_img)
@@ -158,8 +179,8 @@ def _render_montages(run: Run, source: melodic.MelodicSource, workers: int) -> N
     }
     out_dir = Path(settings.MEDIA_ROOT) / "runs" / str(run.pk)
     montage.render_run_montages(
-        ica / "melodic_IC.nii.gz",
-        list(range(1, source.n_components + 1)),
+        ic_path,
+        list(range(1, n_components + 1)),
         bg,
         picks_by_axis,
         window,
