@@ -6,5 +6,21 @@ platforms = ["osx-arm64"]
 version = "0.1.0"
 
 [tasks]
+mockups = "python mockups/generate.py"
 
 [dependencies]
+python = "3.13.*"
+nibabel = ">=5.3"
+numpy = ">=2"
+pillow = ">=11"
+
+[pypi-dependencies]
+# conda-forge pillow is not built against libavif; this plugin supplies the codec
+pillow-avif-plugin = "*"
+
+[feature.dev.dependencies]
+ty = "*"
+ruff = "*"
+
+[environments]
+dev = ["dev"]
