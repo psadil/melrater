@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from django.conf import settings
@@ -106,7 +107,15 @@ def ingest_run(*, path: Path, image_workers: int = 0) -> Run:
                 for component, verdict in zip(components, result.verdicts)
             )
 
-    _render_montages(run, source, image_workers)
+        # inside the transaction so a render failure rolls the run back
+        # instead of leaving a half-ingested run that blocks re-import
+        try:
+            _render_montages(run, source, image_workers)
+        except Exception:
+            shutil.rmtree(
+                Path(settings.MEDIA_ROOT) / "runs" / str(run.pk), ignore_errors=True
+            )
+            raise
     return run
 
 

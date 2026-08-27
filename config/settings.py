@@ -10,11 +10,16 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get(
-    "MELRATER_SECRET_KEY",
-    "django-insecure-dev-only-do-not-use-in-a-public-deployment",
-)
 DEBUG = os.environ.get("MELRATER_DEBUG", "1") == "1"
+SECRET_KEY = os.environ.get("MELRATER_SECRET_KEY", "")
+if not SECRET_KEY:
+    if not DEBUG:
+        from django.core.exceptions import ImproperlyConfigured
+
+        raise ImproperlyConfigured(
+            "MELRATER_SECRET_KEY must be set when MELRATER_DEBUG=0"
+        )
+    SECRET_KEY = "django-insecure-dev-only-do-not-use-in-a-public-deployment"
 ALLOWED_HOSTS = os.environ.get("MELRATER_ALLOWED_HOSTS", "localhost,127.0.0.1").split(
     ","
 )

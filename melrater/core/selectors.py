@@ -116,6 +116,7 @@ def prob_entries_for_run(
     }
     entries = [
         ProbEntry(
+            index=i,
             p_signal=by_index[i][0],
             fix_label=by_index[i][1],
             user_label=user_labels.get(i),

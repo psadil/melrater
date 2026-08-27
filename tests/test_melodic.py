@@ -51,6 +51,22 @@ def test_parse_fix_file(melodic_dir: Path) -> None:
     assert result.verdicts[0].p_signal == pytest.approx(0.9)
 
 
+def test_parse_fix_file_rejects_renumbered_lines(melodic_dir: Path) -> None:
+    # Arrange: swap the component numbers of the two Noise lines
+    fix_file = melodic_dir / "fix4melview_TestModel_thr5.txt"
+    fix_file.write_text(
+        "filtered_func_data.ica\n"
+        "1, Signal, False, 0.9\n"
+        "3, Noise, True, 0.002\n"
+        "2, Noise, True, 0.01\n"
+        "[2, 3]\n"
+    )
+
+    # Act / Assert
+    with pytest.raises(ValueError, match="positionally"):
+        melodic.parse_fix_file(fix_file)
+
+
 def test_load_source_rejects_component_mismatch(melodic_dir: Path) -> None:
     # Arrange: drop one verdict row
     fix_file = melodic_dir / "fix4melview_TestModel_thr5.txt"

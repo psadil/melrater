@@ -98,7 +98,12 @@ def parse_fix_file(path: Path) -> FixResult:
         line = line.strip()
         if not line or line.startswith("["):
             break
-        _, label, _, prob = (part.strip() for part in line.split(","))
+        number, label, _, prob = (part.strip() for part in line.split(","))
+        if int(number) != len(verdicts) + 1:
+            raise ValueError(
+                f"{path.name}: expected component {len(verdicts) + 1}, "
+                f"found {number} — refusing to assign verdicts positionally"
+            )
         verdicts.append(FixVerdict(label=label, p_signal=float(prob)))
     return FixResult(
         model=match["model"], threshold=int(match["thr"]), verdicts=verdicts

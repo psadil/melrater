@@ -38,13 +38,29 @@ def test_metric_glyph_colors_outlier_dot_red() -> None:
 def test_prob_strip_marks_ratings_and_threshold() -> None:
     # Arrange: one rated (disagreeing) and one unrated component
     entries = [
-        charts.ProbEntry(p_signal=0.9, fix_label="Signal", user_label="Noise"),
-        charts.ProbEntry(p_signal=0.001, fix_label="Noise", user_label=None),
+        charts.ProbEntry(index=1, p_signal=0.9, fix_label="Signal", user_label="Noise"),
+        charts.ProbEntry(index=2, p_signal=0.001, fix_label="Noise", user_label=None),
     ]
 
     # Act
-    svg = charts.prob_strip_svg(entries, current_index=0, threshold=0.05)
+    svg = charts.prob_strip_svg(entries, current_ic=1, threshold=0.05)
 
-    # Assert: the rated tick uses the human label's color, threshold is drawn
+    # Assert: the rated tick uses the human label's color, threshold is drawn,
+    # and the current component's dot is present
     assert f'stroke="{charts.C_NOISE}" stroke-width="1.6"' in svg
     assert "thr 0.05" in svg
+    assert f'fill="{charts.C_ACCENT}"' in svg
+
+
+def test_prob_strip_omits_dot_for_unknown_component() -> None:
+    # Arrange
+    entries = [
+        charts.ProbEntry(index=2, p_signal=0.9, fix_label="Signal", user_label=None)
+    ]
+
+    # Act: current component has no FIX entry (e.g. row deleted in admin)
+    svg = charts.prob_strip_svg(entries, current_ic=1, threshold=0.05)
+
+    # Assert: strip still renders, without a current-component dot
+    assert "<svg" in svg
+    assert f'fill="{charts.C_ACCENT}"' not in svg

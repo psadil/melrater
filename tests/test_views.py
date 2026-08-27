@@ -83,6 +83,24 @@ def test_rate_post_records_classification(client, ingested_run: Run, user) -> No
 
 
 @pytest.mark.django_db
+def test_media_requires_login_and_serves_montages(
+    client, ingested_run: Run, user
+) -> None:
+    # Arrange
+    url = f"/media/runs/{ingested_run.pk}/ic001_axial.{ingested_run.montage_format}"
+
+    # Act
+    anonymous = client.get(url)
+    client.force_login(user)
+    authenticated = client.get(url)
+
+    # Assert: montages are login-gated but served regardless of DEBUG
+    assert anonymous.status_code == 302
+    assert anonymous.url.startswith("/accounts/login/")
+    assert authenticated.status_code == 200
+
+
+@pytest.mark.django_db
 def test_rate_post_rejects_bad_label(client, ingested_run: Run, user) -> None:
     # Arrange
     client.force_login(user)

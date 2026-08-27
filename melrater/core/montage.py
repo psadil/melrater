@@ -64,6 +64,11 @@ def axis_picks(mask: np.ndarray, axis: int, n: int = N_LIGHTBOX) -> list[int]:
     other = tuple(i for i in range(3) if i != axis)
     coverage = mask.sum(axis=other) / (mask.shape[other[0]] * mask.shape[other[1]])
     good = np.flatnonzero(coverage > MIN_SLICE_COVERAGE)
+    if good.size == 0:
+        raise ValueError(
+            f"no slice along axis {axis} exceeds {MIN_SLICE_COVERAGE:.0%} mask "
+            f"coverage (mask shape {mask.shape}, {int(mask.sum())} voxels set)"
+        )
     lo, hi = int(good.min()), int(good.max())
     return np.unique(np.linspace(lo, hi, n).round().astype(int)).tolist()
 

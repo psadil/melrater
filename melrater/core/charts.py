@@ -220,13 +220,14 @@ def metric_glyph_svg(
 class ProbEntry:
     """One component's tick on the P(signal) strip."""
 
+    index: int  # 1-based component index
     p_signal: float
     fix_label: str
     user_label: str | None
 
 
 def prob_strip_svg(
-    entries: Sequence[ProbEntry], current_index: int, threshold: float
+    entries: Sequence[ProbEntry], current_ic: int, threshold: float
 ) -> str:
     """All components' P(signal) on a log axis with the decision threshold.
 
@@ -277,10 +278,11 @@ def prob_strip_svg(
             f'x2="{px(entry.p_signal):.1f}" y2="{y_hi}" '
             f'stroke="{color}" stroke-width="{sw}" opacity="{opacity}"/>'
         )
-    cur = entries[current_index]
-    parts.append(
-        f'<circle cx="{px(cur.p_signal):.1f}" cy="30" r="5" fill="{C_ACCENT}" '
-        f'stroke="{C_BG}" stroke-width="1.5"/>'
-    )
+    cur = next((e for e in entries if e.index == current_ic), None)
+    if cur is not None:
+        parts.append(
+            f'<circle cx="{px(cur.p_signal):.1f}" cy="30" r="5" fill="{C_ACCENT}" '
+            f'stroke="{C_BG}" stroke-width="1.5"/>'
+        )
     parts.append("</svg>")
     return "".join(parts)

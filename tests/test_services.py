@@ -44,6 +44,22 @@ def test_ingest_run_renders_montages(melodic_dir: Path, media_root: Path) -> Non
 
 
 @pytest.mark.django_db
+def test_ingest_rolls_back_when_montage_rendering_fails(
+    melodic_dir: Path, media_root: Path
+) -> None:
+    # Arrange: remove the montage background so rendering must fail
+    (melodic_dir / "filtered_func_data.ica" / "mean.nii.gz").unlink()
+
+    # Act / Assert: nothing half-ingested remains, so a fixed run can re-import
+    with pytest.raises(FileNotFoundError):
+        services.ingest_run(path=melodic_dir)
+    assert Run.objects.count() == 0
+    assert not (media_root / "runs").exists() or not any(
+        (media_root / "runs").iterdir()
+    )
+
+
+@pytest.mark.django_db
 def test_ingest_run_twice_raises(melodic_dir: Path, media_root: Path) -> None:
     # Arrange
     services.ingest_run(path=melodic_dir)

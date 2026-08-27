@@ -76,7 +76,9 @@ def _component_context(run: Run, component: Component, user) -> dict:
     user_labels = selectors.user_labels_for_run(run, user)
     prob_entries, threshold = selectors.prob_entries_for_run(run, user_labels)
     prob_strip = (
-        charts.prob_strip_svg(prob_entries, index - 1, threshold or 0.01)
+        charts.prob_strip_svg(
+            prob_entries, index, threshold if threshold is not None else 0.01
+        )
         if prob_entries
         else None
     )
@@ -123,6 +125,6 @@ def component_rate(request: HttpRequest, run_id: int, index: int) -> HttpRespons
             user=request.user, component=component, label=request.POST.get("label", "")
         )
     except ValueError as exc:
-        return HttpResponseBadRequest(str(exc))
+        return HttpResponseBadRequest(str(exc), content_type="text/plain")
     context = _component_context(run, component, request.user)
     return render(request, "core/partials/rate_response.html", context)
