@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, render
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_http_methods
 
 from melrater.core import charts, selectors, services
 from melrater.core.metrics import OUTLIER_Z, family_of
@@ -19,9 +20,16 @@ RATING_BUTTONS = [
 ]
 
 
+def _authed_user(request: HttpRequest) -> AbstractBaseUser:
+    user = request.user
+    # login_required guarantees this; narrows away AnonymousUser for ty
+    assert not isinstance(user, AnonymousUser)
+    return user
+
+
 @login_required
 def run_list(request: HttpRequest) -> HttpResponse:
-    rows = selectors.runs_with_progress(request.user)
+    rows = selectors.runs_with_progress(_authed_user(request))
     return render(request, "core/run_list.html", {"rows": rows})
 
 
@@ -84,7 +92,7 @@ def _metric_panel(run_data: RunData, comp: ComponentData) -> dict:
     }
 
 
-def _component_context(run: Run, component: Component, user) -> dict:
+def _component_context(run: Run, component: Component, user: AbstractBaseUser) -> dict:
     # typed projections at the ORM boundary (see schemas.py)
     run_data = selectors.run_data(run)
     comp = selectors.component_data(component)
@@ -131,20 +139,21 @@ def _component_context(run: Run, component: Component, user) -> dict:
 def component_detail(request: HttpRequest, run_id: int, index: int) -> HttpResponse:
     run = get_object_or_404(Run, pk=run_id)
     component = get_object_or_404(Component, run=run, index=index)
-    context = _component_context(run, component, request.user)
+    context = _component_context(run, component, _authed_user(request))
     return render(request, "core/component_detail.html", context)
 
 
 @login_required
-@require_POST
+@require_http_methods(["POST"])
 def component_rate(request: HttpRequest, run_id: int, index: int) -> HttpResponse:
+    user = _authed_user(request)
     run = get_object_or_404(Run, pk=run_id)
     component = get_object_or_404(Component, run=run, index=index)
     try:
         services.rate_component(
-            user=request.user, component=component, label=request.POST.get("label", "")
+            user=user, component=component, label=request.POST.get("label", "")
         )
     except ValueError as exc:
         return HttpResponseBadRequest(str(exc), content_type="text/plain")
-    context = _component_context(run, component, request.user)
+    context = _component_context(run, component, user)
     return render(request, "core/partials/rate_response.html", context)

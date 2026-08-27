@@ -7,7 +7,30 @@ version = "0.1.0"
 
 [tasks]
 manage = "python manage.py"
-serve = "python manage.py runserver"
+collectstatic = "python manage.py collectstatic --noinput"
+# async server: granian on uvloop; Django implements no lifespan protocol, so
+# the interface is asginl, and granian serves the collected static files itself
+serve = { cmd = [
+    "granian",
+    "config.asgi:application",
+    "--interface",
+    "asginl",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8000",
+    "--no-ws",
+    "--workers",
+    "2",
+    "--runtime-mode",
+    "st",
+    "--loop",
+    "uvloop",
+    "--static-path-route",
+    "/static",
+    "--static-path-mount",
+    "staticfiles",
+], env = { PYTHONPATH = "src" }, depends-on = ["collectstatic"] }
 
 [dependencies]
 python = "3.13.*"
@@ -16,6 +39,8 @@ numpy = ">=2"
 pillow = ">=11"
 django = ">=6"
 pydantic = ">=2"
+granian = ">=2.6"
+uvloop = ">=0.22"
 
 [pypi-dependencies]
 # conda-forge pillow is not built against libavif; this plugin supplies the codec
@@ -33,6 +58,9 @@ pytest = ">=8"
 pytest-django = ">=4.9"
 playwright = "*"
 pytest-playwright = "*"
+# PEP 561 stubs only (no mypy plugin): enough for ty to resolve managers,
+# field descriptor values, and request.user
+django-stubs = ">=5.2"
 
 [environments]
 dev = ["dev"]

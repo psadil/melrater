@@ -10,20 +10,7 @@ include = ["src", "tests", "manage.py"]
 
 [tool.ty.environment]
 root = ["./src", "."]
-
-# Django attaches managers (`Model.objects`), reverse relations, and
-# `request.user` at runtime; ty has no Django plugin (still true on Django 6),
-# so this single rule false-positives on every ORM touch. It stays ignored
-# ONLY in the query/service layer and its tests; field-value typing in views
-# is handled with explicit casts at the model boundary instead of ignores.
-[[tool.ty.overrides]]
-include = [
-    "src/melrater/core/services.py",
-    "src/melrater/core/selectors.py",
-    "src/melrater/core/views.py",
-    "src/melrater/core/management/**",
-    "tests/**",
-]
-
-[tool.ty.overrides.rules]
-unresolved-attribute = "ignore"
+# check against the dev env, where django-stubs (PEP 561 stubs, no mypy
+# plugin) makes managers, field descriptor values, and request.user resolve;
+# reverse FK accessors are declared as stub-only annotations on the models
+python = ".pixi/envs/dev"

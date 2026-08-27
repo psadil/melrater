@@ -99,7 +99,8 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "static/"
+# leading slash matches granian's --static-path-route (see the serve task)
+STATIC_URL = "/static/"
 STATICFILES_DIRS = [SRC_DIR / "static"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 

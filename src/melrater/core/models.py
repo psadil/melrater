@@ -1,7 +1,13 @@
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from django.conf import settings
 from django.db import models
+
+if TYPE_CHECKING:
+    # Stub-only (django-stubs): the type of a reverse FK accessor. Declaring
+    # the accessors as plain annotations gives them types without the mypy
+    # plugin; Django ignores un-assigned annotations, so no field is created.
+    from django.db.models.fields.related_descriptors import RelatedManager
 
 
 class Run(models.Model):
@@ -21,6 +27,8 @@ class Run(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
+    components: "RelatedManager[Component]"
+
     def __str__(self) -> str:
         return str(self.label)
 
@@ -35,6 +43,8 @@ class Component(models.Model):
     timecourse = models.JSONField()
     spectrum = models.JSONField()
     metrics = models.JSONField(help_text="Per-metric raw value and robust z-score")
+
+    classifications: "RelatedManager[Classification]"
 
     class Meta:
         ordering: ClassVar = ["run", "index"]
@@ -66,6 +76,8 @@ class Reviewer(models.Model):
     )
     fix_model = models.CharField(max_length=100, blank=True)
     fix_threshold = models.PositiveIntegerField(null=True, blank=True)
+
+    classifications: "RelatedManager[Classification]"
 
     def __str__(self) -> str:
         return str(self.name)

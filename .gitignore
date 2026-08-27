@@ -7,6 +7,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# runtime state: database and ingested subject-derived media
+# runtime state: database, ingested subject-derived media, collected static
 db/
 media/
+staticfiles/
