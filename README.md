@@ -59,16 +59,12 @@ with FIX stand out as a color on the wrong side of the threshold line.
 ## Development
 
 ```sh
-pixi run -e dev test        # pytest
+pixi run -e dev test        # unit tests
+pixi run -e dev test-e2e    # playwright browser tests
 pixi run -e dev ruff check .
 pixi run -e dev ty check
-pixi run mockups            # regenerate the static design mockups
 ```
 
-Conventions: [HackSoft Django StyleGuide](https://github.com/HackSoftware/Django-Styleguide)
-(services/selectors), typed Python checked by ty, ruff lint+format,
-pytest with arrange-act-assert, SQLite in production (WAL,
-`transaction_mode=IMMEDIATE`), and a thin htmx frontend (state lives on the
-backend; the only custom JS is keyboard shortcuts and the montage-axis
-toggle). The database (`db/`) and ingested montages (`media/`) contain
-subject-derived data and stay untracked.
+See [contributing.md](contributing.md) for layout and conventions. The
+database (`db/`) and ingested montages (`media/`) contain subject-derived
+data and stay untracked.
