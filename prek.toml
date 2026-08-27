@@ -1,0 +1,46 @@
+# A plain `prek install` wires up both git shims (see the commit-msg hook below).
+default_install_hook_types = ["pre-commit", "commit-msg"]
+# Lint/format hooks only run pre-commit; the commit-msg stage is reserved for
+# the Conventional Commits check, so lint hooks never scan the commit message.
+default_stages = ["pre-commit"]
+
+[[repos]]
+repo = "https://github.com/astral-sh/ruff-pre-commit"
+rev = "v0.16.4"
+hooks = [
+    { id = "ruff-check", args = [
+        "--fix",
+    ], types_or = [
+        "python",
+        "pyproject",
+    ] },
+    { id = "ruff-format", types_or = [
+        "python",
+        "pyproject",
+    ] },
+]
+
+# Type check with ty out of the pixi dev env — pixi stays the only env manager
+# (the upstream ty-pre-commit hook wraps `uv check` instead). --locked refuses a
+# stale pixi.lock instead of mutating it mid-commit. Whole-project check (a change
+# in b.py can break a.py), so no filenames; always_run covers deletion-only commits.
+[[repos]]
+repo = "local"
+hooks = [
+    { id = "ty", name = "ty", entry = "pixi run --locked -e dev ty check", language = "system", pass_filenames = false, always_run = true },
+]
+
+[[repos]]
+repo = "https://github.com/codespell-project/codespell"
+rev = "v2.4.1"
+# Generated lock files aren't prose; skip them (they trip codespell on
+# package names that look like typos).
+hooks = [{ id = "codespell", exclude = '\.lock$' }]
+
+# Enforce Conventional Commits (https://www.conventionalcommits.org) on every
+# commit message. Runs at the commit-msg stage, so it needs the commit-msg shim
+# installed (handled by default_install_hook_types above).
+[[repos]]
+repo = "https://github.com/compilerla/conventional-pre-commit"
+rev = "v4.4.0"
+hooks = [{ id = "conventional-pre-commit", stages = ["commit-msg"] }]

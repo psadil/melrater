@@ -1,0 +1,10 @@
+[workspace]
+authors = ["Patrick Sadil <psadil@gmail.com>"]
+channels = ["conda-forge"]
+name = "melrater"
+platforms = ["osx-arm64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
