@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}log in · melrater{% endblock %}
+{% block content %}
+<div class="login-page">
+  <div class="card login-card">
+    <div class="card-title">log in</div>
+    {% if form.errors %}<p class="form-error">Invalid username or password.</p>{% endif %}
+    <form method="post">{% csrf_token %}
+      <label>username {{ form.username }}</label>
+      <label>password {{ form.password }}</label>
+      <button class="rate" type="submit">log in</button>
+      <input type="hidden" name="next" value="{{ next }}">
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,20 @@
+<div class="card" id="verdict-card"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <div class="card-title">FIX verdict</div>
+  {% for v in fix_rows %}
+    <div class="verdict-row">
+      <span class="meta-chip">{{ v.reviewer }}</span>
+      <span class="verdict verdict-{{ v.label|lower }}">{{ v.label|upper }}</span>
+      {% if v.probability is not None %}
+        <span class="verdict-p">P(signal) = {{ v.probability_fmt }}
+          {% if v.threshold is not None %}<em>vs thr {{ v.threshold }}</em>{% endif %}</span>
+      {% endif %}
+    </div>
+  {% empty %}
+    <div class="muted">no FIX classifications for this run</div>
+  {% endfor %}
+  {% if prob_strip %}
+    {{ prob_strip|safe }}
+    <div class="strip-legend">tall tick = rated (color = human label) ·
+      faint tick = unrated (FIX label) · dot = this IC</div>
+  {% endif %}
+</div>

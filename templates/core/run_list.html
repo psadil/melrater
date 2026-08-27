@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}runs · melrater{% endblock %}
+{% block content %}
+<div class="run-list">
+  <h1>Runs</h1>
+  {% if not rows %}
+    <p class="muted">No runs ingested yet. Ingest one with:
+      <code>pixi run manage import_run /path/to/derivatives_dir</code></p>
+  {% endif %}
+  {% for row in rows %}
+    <div class="card run-card">
+      <div class="run-card-head">
+        <a class="run-label"
+           href="{% url 'component-detail' row.run.pk row.next_unrated|default:1 %}">{{ row.run.label }}</a>
+        <span class="meta-chip">TR {{ row.run.tr|floatformat:"-3" }} s</span>
+        <span class="meta-chip">{{ row.n_components }} components</span>
+        {% for name in row.fix_reviewers %}<span class="meta-chip">{{ name }}</span>{% endfor %}
+      </div>
+      <div class="run-card-progress">
+        <span class="progress-bar"><i style="width: {% widthratio row.n_rated row.n_components 100 %}%"></i></span>
+        <span class="muted">{{ row.n_rated }} / {{ row.n_components }} rated by you</span>
+        {% if row.next_unrated %}
+          <a class="nav-btn" href="{% url 'component-detail' row.run.pk row.next_unrated %}">continue at IC {{ row.next_unrated }}</a>
+        {% else %}
+          <span class="chip chip-ok">complete</span>
+        {% endif %}
+      </div>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

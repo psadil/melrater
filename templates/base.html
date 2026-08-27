@@ -1,0 +1,26 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}melrater{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'css/melrater.css' %}">
+  <script src="{% static 'vendor/htmx.min.js' %}" defer></script>
+  <script src="{% static 'js/melrater.js' %}" defer></script>
+</head>
+<body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+  <header class="topbar">
+    <a class="brand" href="{% url 'run-list' %}">melrater</a>
+    {% block topbar %}{% endblock %}
+    <span class="topbar-right">
+      {% if user.is_authenticated %}
+        <span class="meta-chip">{{ user.get_username }}</span>
+        <form method="post" action="{% url 'logout' %}">{% csrf_token %}
+          <button class="nav-btn" type="submit">log out</button>
+        </form>
+      {% endif %}
+    </span>
+  </header>
+  {% block content %}{% endblock %}
+</body>
+</html>

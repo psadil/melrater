@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}{{ run.label }} · IC {{ component.index }}{% endblock %}
+{% block content %}
+<div class="rating-page">
+  <div class="toolbar">
+    {% if prev_index %}<a id="nav-prev" class="nav-btn" href="{% url 'component-detail' run.pk prev_index %}">&#8592;</a>
+    {% else %}<span class="nav-btn disabled">&#8592;</span>{% endif %}
+    <span class="pos">IC {{ component.index }} / {{ n_total }}</span>
+    {% if next_index %}<a id="nav-next" class="nav-btn" href="{% url 'component-detail' run.pk next_index %}">&#8594;</a>
+    {% else %}<span class="nav-btn disabled">&#8594;</span>{% endif %}
+    <input id="jump" class="jump" placeholder="go to&#8230;"
+           data-url-template="{% url 'component-detail' run.pk 999999 %}">
+    {% if next_unrated %}
+      <a class="nav-btn" href="{% url 'component-detail' run.pk next_unrated %}">next unrated &#8674;</a>
+    {% endif %}
+    <span class="meta-chip">{{ run.label }}</span>
+    <span class="meta-chip">TR {{ tr_fmt }} s</span>
+    <span class="meta-chip">expl. var {{ expl_var_fmt }}%</span>
+    <span class="meta-chip">total var {{ total_var_fmt }}%</span>
+    <span class="toolbar-right">
+      {% if n_outliers %}
+        <a class="chip chip-alert" href="#metrics">&#9888; {{ n_outliers }} outlier metric{{ n_outliers|pluralize }} (|z|&gt;{{ outlier_z|floatformat:0 }})</a>
+      {% else %}
+        <span class="chip chip-ok">no outlying metrics</span>
+      {% endif %}
+    </span>
+  </div>
+
+  <div class="brain">
+    <div class="axis-btns">
+      {% for axis, url in montages.items %}
+        <button class="axis-btn{% if axis == 'axial' %} active{% endif %}" data-axis-btn="{{ axis }}">{{ axis }}</button>
+      {% endfor %}
+    </div>
+    {% for axis, url in montages.items %}
+      <img class="montage{% if axis == 'axial' %} active{% endif %}" data-axis-img="{{ axis }}"
+           src="{{ url }}" alt="{{ axis }} lightbox">
+    {% endfor %}
+    <div class="montage-caption">|z| &ge; 3 · red-yellow +, blue-lightblue &minus; ·
+      labels are voxel indices · axial/coronal shown neurological (subject L on image left)</div>
+  </div>
+
+  <div class="side">
+    {% include "core/partials/verdict_card.html" %}
+    <div class="card"><div class="card-title">timecourse + motion</div>{{ tc_fd_svg|safe }}</div>
+    <div class="card"><div class="card-title">spectrum</div>{{ spectrum_svg|safe }}</div>
+    <div class="card metrics-card" id="metrics">
+      <div class="card-title">FIX metrics
+        <span>{% if n_outliers %}<span class="chip chip-alert">&#9888; {{ n_outliers }} outliers</span>
+        {% else %}<span class="chip chip-ok">no outliers</span>{% endif %}</span>
+      </div>
+      {% if metric_outliers %}
+        <div class="metric-section">outliers (|z| &gt; {{ outlier_z|floatformat:0 }})</div>
+        {% for row in metric_outliers %}{% include "core/partials/metric_row.html" %}{% endfor %}
+      {% else %}
+        <div class="metric-empty">no metric exceeds |z| &gt; {{ outlier_z|floatformat:0 }} — nothing anomalous</div>
+      {% endif %}
+      <div class="metric-section">all families</div>
+      {% for fam in metric_families %}
+        <details>
+          <summary>{{ fam.name }} <span class="fam-n">{{ fam.rows|length }}</span>
+            <span class="famz" style="color:{{ fam.color }}">max|z| {{ fam.max_z_fmt }}</span></summary>
+          {% for row in fam.rows %}{% include "core/partials/metric_row.html" %}{% endfor %}
+        </details>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% include "core/partials/ratebar.html" %}
+</div>
+{% endblock %}

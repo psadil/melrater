@@ -1,0 +1,14 @@
+<div class="ratebar" id="ratebar">
+  <div class="rate-buttons">
+    {% for b in rating_buttons %}
+      <button class="rate rate-{{ b.label|lower }}{% if user_label == b.label %} selected{% endif %}"
+              data-rate="{{ b.label }}"
+              hx-post="{% url 'component-rate' run.pk component.index %}"
+              hx-vals='{"label": "{{ b.label }}"}'
+              hx-target="#ratebar" hx-swap="outerHTML">
+        {{ b.label }}{% for k in b.keys %} <kbd>{{ k }}</kbd>{% endfor %}
+      </button>
+    {% endfor %}
+  </div>
+  <span class="progress">{{ n_rated }} / {{ n_total }} rated</span>
+</div>
