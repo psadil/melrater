@@ -11,3 +11,6 @@ __pycache__/
 db/
 media/
 staticfiles/
+
+# editory
+.vscode/
