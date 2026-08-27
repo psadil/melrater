@@ -50,7 +50,8 @@ CPUs − 2; a 96-component run takes a few seconds).
 pixi run serve
 ```
 
-Then open <http://127.0.0.1:8000/>. Keyboard: `1`/`s` signal, `2`/`u` unknown,
+This collects static files and starts [granian](https://github.com/emmett-framework/granian)
+(async, uvloop) on <http://127.0.0.1:8000/>. Keyboard: `1`/`s` signal, `2`/`u` unknown,
 `3`/`n` noise, `←`/`→` prev/next component, `g` jump to an IC number.
 Human ratings are stored per user; the P(signal) strip in the verdict card
 colors each component by its human rating once one exists, so disagreements

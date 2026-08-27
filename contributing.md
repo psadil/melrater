@@ -33,12 +33,15 @@ pixi run -e dev ty check
   writes in `services.py`, reads in `selectors.py`, views stay thin.
   Domain logic (`melodic.py`, `metrics.py`, `montage.py`, `charts.py`) is
   Django-free and fully typed.
-- **Typing**: checked by ty. Django's ORM is invisible to static checkers
-  (no ty plugin), so `unresolved-attribute` is ignored in the ORM-glue files
-  only (see `pyproject.toml`). Everywhere else stays fully checked: JSONField
-  payloads have pydantic schemas (`schemas.py`), and selectors project ORM
-  rows into those typed models at the boundary — add fields to the schema
-  rather than reaching into raw JSON or `cast`ing.
+- **Typing**: checked by ty with no rule overrides. django-stubs (PEP 561
+  stubs only, no mypy plugin; dev env) resolves managers, field descriptor
+  values, and `request.user`; reverse FK accessors are declared as stub-only
+  annotations on the models (`components: "RelatedManager[Component]"` —
+  Django ignores un-assigned annotations); views narrow `request.user`
+  through `_authed_user`. JSONField payloads have pydantic schemas
+  (`schemas.py`), and selectors project ORM rows into those typed models at
+  the boundary — add fields to the schema rather than reaching into raw JSON
+  or `cast`ing.
 - **Tests** are pytest, arrange-act-assert, **one assertion per test**
   (a single composite `assert` on one logical claim is fine). Shared setup
   goes in fixtures. Browser-level behavior belongs in `tests/e2e/`
@@ -49,5 +52,8 @@ pixi run -e dev ty check
 - **Migrations**: after `makemigrations`, convert the generated
   `dependencies`/`operations` lists to tuples (ruff's RUF012 is enforced
   everywhere, and tuples avoid ClassVar override conflicts).
+- **Serving**: `pixi run serve` runs granian (async, uvloop, ASGI without
+  lifespan) and mounts the collected static files itself; montages under
+  `/media/` always go through the login-required Django view.
 - **SQLite in production**: WAL journal, `IMMEDIATE` transactions
   (see `config/settings.py`); don't add a second database backend.
