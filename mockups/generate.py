@@ -62,6 +62,13 @@ MIN_SLICE_COVERAGE = 0.05  # mask fraction for an axial slice to be shown
 N_LIGHTBOX = 25
 N_STRIP = 8
 
+# Simulated human review state for variant C: ICs 1..MOCK_RATED_THROUGH have
+# been "rated", agreeing with FIX except for deliberate overrides near the
+# decision threshold — so rating-colored ticks visibly sit on the "wrong" side
+# of the threshold line, which is exactly the disagreement signal to judge.
+MOCK_RATED_THROUGH = 24
+MOCK_RATING_OVERRIDES = {2: "Noise", 9: "Unknown", 15: "Signal"}
+
 PINNED_FAMILIES = [
     "motioncorrelation",
     "edgemasks",
@@ -87,6 +94,7 @@ C_FD = "#e8a13c"
 C_SEV_OK = "#8b93a1"
 C_SEV_WARN = "#fbbf24"
 C_SEV_BAD = "#f87171"
+RATING_COLORS = {"Signal": C_SIGNAL, "Noise": C_NOISE, "Unknown": C_UNKNOWN}
 
 # --------------------------------------------------------------------------
 # LOADERS
@@ -213,14 +221,20 @@ def pinned_indices(table: MetricTable, row: int) -> list[tuple[str, int]]:
     return pinned
 
 
-def slice_picks(mask: np.ndarray) -> tuple[list[int], list[int]]:
-    nx, ny, _ = mask.shape
-    coverage = mask.sum(axis=(0, 1)) / (nx * ny)
+def axis_picks(mask: np.ndarray, axis: int, n: int) -> list[int]:
+    """Evenly spaced slice indices along `axis` where the mask has coverage."""
+    other = tuple(i for i in range(3) if i != axis)
+    coverage = mask.sum(axis=other) / (mask.shape[other[0]] * mask.shape[other[1]])
     good = np.flatnonzero(coverage > MIN_SLICE_COVERAGE)
-    z0, z1 = int(good.min()), int(good.max())
-    lightbox = np.unique(np.linspace(z0, z1, N_LIGHTBOX).round().astype(int)).tolist()
-    strip = np.unique(np.linspace(z0, z1, N_STRIP).round().astype(int)).tolist()
-    return lightbox, strip
+    lo, hi = int(good.min()), int(good.max())
+    return np.unique(np.linspace(lo, hi, n).round().astype(int)).tolist()
+
+
+def mock_user_ratings(verdicts: list[Verdict]) -> dict[int, str]:
+    """1-based IC -> simulated human label for the 'partially rated' state."""
+    ratings = {ic: verdicts[ic - 1].label for ic in range(1, MOCK_RATED_THROUGH + 1)}
+    ratings.update(MOCK_RATING_OVERRIDES)
+    return ratings
 
 
 # --------------------------------------------------------------------------
@@ -272,20 +286,27 @@ def _upscale(rgb: np.ndarray) -> np.ndarray:
     return np.repeat(np.repeat(rgb, UPSCALE, axis=0), UPSCALE, axis=1)
 
 
-def axial_cell(
-    bg: np.ndarray, ov: np.ndarray, z: int, window: tuple[float, float]
+def slice_cell(
+    bg: np.ndarray, ov: np.ndarray, axis: int, idx: int, window: tuple[float, float]
 ) -> np.ndarray:
-    return _upscale(_display(slice_rgb(bg[:, :, z], ov[:, :, z], window)))
+    bg2d = np.take(bg, idx, axis=axis)
+    ov2d = np.take(ov, idx, axis=axis)
+    return _upscale(_display(slice_rgb(bg2d, ov2d, window)))
+
+
+# left/right edge annotations per display axis (0=sagittal, 1=coronal, 2=axial)
+_EDGE_LABELS = {0: ("P", "A"), 1: ("L", "R"), 2: ("L", "R")}
 
 
 def render_lightbox(
     bg: np.ndarray,
     ov: np.ndarray,
-    zs: list[int],
+    picks: list[int],
     window: tuple[float, float],
+    axis: int = 2,
     cols: int = 5,
 ) -> Image.Image:
-    cells = [axial_cell(bg, ov, z, window) for z in zs]
+    cells = [slice_cell(bg, ov, axis, i, window) for i in picks]
     ch, cw, _ = cells[0].shape
     rows = -(-len(cells) // cols)
     gap = 2
@@ -298,21 +319,22 @@ def render_lightbox(
         canvas[y0 : y0 + ch, x0 : x0 + cw] = cell
     img = Image.fromarray(canvas)
     draw = ImageDraw.Draw(img)
-    for i, z in enumerate(zs):
+    for i, idx in enumerate(picks):
         r, c = divmod(i, cols)
         draw.text(
-            (c * (cw + gap) + 4, r * (ch + gap) + 2), str(z), fill=(150, 155, 165)
+            (c * (cw + gap) + 4, r * (ch + gap) + 2), str(idx), fill=(150, 155, 165)
         )
     # orientation labels on the first cell (neurological: subject L on image left)
-    draw.text((4, ch - 16), "L", fill=(200, 205, 215))
-    draw.text((cw - 12, ch - 16), "R", fill=(200, 205, 215))
+    left, right = _EDGE_LABELS[axis]
+    draw.text((4, ch - 16), left, fill=(200, 205, 215))
+    draw.text((cw - 12, ch - 16), right, fill=(200, 205, 215))
     return img
 
 
 def render_strip(
     bg: np.ndarray, ov: np.ndarray, zs: list[int], window: tuple[float, float]
 ) -> Image.Image:
-    cells = [axial_cell(bg, ov, z, window) for z in zs]
+    cells = [slice_cell(bg, ov, 2, z, window) for z in zs]
     ch, cw, _ = cells[0].shape
     gap = 2
     canvas = np.zeros((ch, len(cells) * cw + (len(cells) - 1) * gap, 3), np.uint8)
@@ -567,8 +589,17 @@ def metric_glyph_svg(table: MetricTable, row: int, col: int) -> str:
     return "".join(parts)
 
 
-def prob_strip_svg(verdicts: list[Verdict], current_row: int) -> str:
-    """All 96 P(signal) values on a log axis, with the threshold and this IC."""
+def prob_strip_svg(
+    verdicts: list[Verdict],
+    current_row: int,
+    ratings: dict[int, str] | None = None,
+) -> str:
+    """All 96 P(signal) values on a log axis, with the threshold and this IC.
+
+    With `ratings`, ticks for rated components are tall and colored by the
+    human label (a color on the "wrong" side of the threshold line marks a
+    disagreement with FIX); unrated ticks are short, faint, FIX-colored.
+    """
     w, h = 340, 52
     x0, x1 = 16.0, w - 10.0
     lo_exp = -5.0
@@ -602,10 +633,17 @@ def prob_strip_svg(verdicts: list[Verdict], current_row: int) -> str:
         f'<text x="{tx + 3:.1f}" y="12" fill="{C_UNKNOWN}">thr {FIX_THRESHOLD}</text>'
     )
     for i, v in enumerate(verdicts):
-        color = C_SIGNAL if v.label == "Signal" else C_NOISE
+        fix_color = C_SIGNAL if v.label == "Signal" else C_NOISE
+        rating = ratings.get(i + 1) if ratings is not None else None
+        if rating is not None:
+            color, opacity, y_lo, y_hi, sw = RATING_COLORS[rating], 0.95, 20, 40, 1.6
+        elif ratings is not None:
+            color, opacity, y_lo, y_hi, sw = fix_color, 0.28, 25, 35, 1.2
+        else:
+            color, opacity, y_lo, y_hi, sw = fix_color, 0.55, 22, 38, 1.2
         parts.append(
-            f'<line x1="{px(v.p_signal):.1f}" y1="22" x2="{px(v.p_signal):.1f}" y2="38" '
-            f'stroke="{color}" stroke-width="1.2" opacity="0.55"/>'
+            f'<line x1="{px(v.p_signal):.1f}" y1="{y_lo}" x2="{px(v.p_signal):.1f}" '
+            f'y2="{y_hi}" stroke="{color}" stroke-width="{sw}" opacity="{opacity}"/>'
         )
     cur = verdicts[current_row]
     parts.append(
@@ -653,6 +691,7 @@ def metrics_panel_html(
     row: int,
     ic: int,
     max_outliers: int | None = None,
+    include_pinned: bool = True,
 ) -> str:
     outliers = outlier_indices(table, row)
     pinned = pinned_indices(table, row)
@@ -676,10 +715,12 @@ def metrics_panel_html(
             )
     else:
         parts.append(
-            '<div class="metric-empty">no metric exceeds |z| &gt; 3 — nothing anomalous</div>'
+            f'<div class="metric-empty">no metric exceeds |z| &gt; {OUTLIER_Z:g} '
+            "— nothing anomalous</div>"
         )
-    parts.append('<div class="metric-section">pinned</div>')
-    parts.extend(metric_row_html(table, row, j, label) for label, j in pinned)
+    if include_pinned:
+        parts.append('<div class="metric-section">pinned</div>')
+        parts.extend(metric_row_html(table, row, j, label) for label, j in pinned)
     # complete families, collapsed
     parts.append('<div class="metric-section">all families</div>')
     fams = family_members(table)
@@ -708,14 +749,16 @@ def verdict_chip_html(v: Verdict) -> str:
     )
 
 
-def rating_buttons_html() -> str:
-    return (
-        '<div class="rate-buttons">'
-        '<button class="rate rate-signal" data-rate="Signal">Signal <kbd>1</kbd><kbd>s</kbd></button>'
-        '<button class="rate rate-unknown" data-rate="Unknown">Unknown <kbd>2</kbd><kbd>u</kbd></button>'
-        '<button class="rate rate-noise" data-rate="Noise">Noise <kbd>3</kbd><kbd>n</kbd></button>'
-        "</div>"
-    )
+def rating_buttons_html(selected: str | None = None) -> str:
+    buttons = []
+    for label, kbds in (("Signal", "1s"), ("Unknown", "2u"), ("Noise", "3n")):
+        sel = " selected" if selected == label else ""
+        keys = "".join(f"<kbd>{k}</kbd>" for k in kbds)
+        buttons.append(
+            f'<button class="rate rate-{label.lower()}{sel}" data-rate="{label}">'
+            f"{label} {keys}</button>"
+        )
+    return '<div class="rate-buttons">' + "".join(buttons) + "</div>"
 
 
 @dataclass(frozen=True)
@@ -731,11 +774,15 @@ class ComponentPartials:
     spec_narrow: str
     spec_wide: str
     lightbox_uri: str
+    lightbox_cor_uri: str
+    lightbox_sag_uri: str
     ortho_uri: str
     strip_uri: str
     metrics_compact: str
     metrics_full: str
+    metrics_no_pin: str
     prob_strip: str
+    prob_strip_rated: str
 
 
 def build_partials(
@@ -754,6 +801,9 @@ def build_partials(
     ic_img: nib.nifti1.Nifti1Image,
     lightbox_zs: list[int],
     strip_zs: list[int],
+    cor_picks: list[int],
+    sag_picks: list[int],
+    ratings: dict[int, str],
 ) -> ComponentPartials:
     row = ic - 1
     ov = canonical_vol(ic_img, row)
@@ -774,11 +824,15 @@ def build_partials(
         spec_narrow=spectrum_svg(ft, freqs, width=376),
         spec_wide=spectrum_svg(ft, freqs, width=760),
         lightbox_uri=encode_img(render_lightbox(bg, ov, lightbox_zs, window)),
+        lightbox_cor_uri=encode_img(render_lightbox(bg, ov, cor_picks, window, axis=1)),
+        lightbox_sag_uri=encode_img(render_lightbox(bg, ov, sag_picks, window, axis=0)),
         ortho_uri=encode_img(render_ortho(bg, ov, (peak[0], peak[1], peak[2]), window)),
         strip_uri=encode_img(render_strip(bg, ov, strip_zs, window)),
         metrics_compact=metrics_panel_html(table, row, ic, max_outliers=5),
         metrics_full=metrics_panel_html(table, row, ic),
+        metrics_no_pin=metrics_panel_html(table, row, ic, include_pinned=False),
         prob_strip=prob_strip_svg(verdicts, row),
+        prob_strip_rated=prob_strip_svg(verdicts, row, ratings),
     )
 
 
@@ -911,6 +965,15 @@ JS_SHARED = Template("""
   document.addEventListener('click', e => {
     const tab = e.target.closest('[data-ic-tab]');
     if (tab) { show(ics.indexOf(Number(tab.dataset.icTab))); return; }
+    const ax = e.target.closest('[data-axis-btn]');
+    if (ax) {
+      const sec = ax.closest('[data-ic-section]');
+      sec.querySelectorAll('[data-axis-btn]').forEach(b =>
+        b.classList.toggle('active', b === ax));
+      sec.querySelectorAll('[data-axis-img]').forEach(img =>
+        img.classList.toggle('active', img.dataset.axisImg === ax.dataset.axisBtn));
+      return;
+    }
     const q = e.target.closest('[data-queue-ic]');
     if (q) {
       const i = ics.indexOf(Number(q.dataset.queueIc));
@@ -1156,6 +1219,111 @@ def build_variant_b(
     )
 
 
+MONTAGE_CAPTION_C = (
+    f"|z| &ge; {Z_THRESH:g} · red-yellow +, blue-lightblue &minus; · labels are "
+    "voxel indices · axial/coronal shown neurological (subject L on image left)"
+)
+
+
+def build_variant_c(
+    partials: list[ComponentPartials],
+    n_total: int,
+    tr: float,
+    ratings: dict[int, str],
+) -> str:
+    """Merged design: A's lightbox-dominant layout with a slice-axis switcher
+    (no ortho), B's P(signal) strip in the sidebar colored by human ratings,
+    compact charts, and the metrics panel without the pinned section."""
+    css = CSS_SHARED + Template("""
+[data-ic-section].active {
+  display: grid;
+  grid-template:
+    "toolbar toolbar" 48px
+    "brain   side"    minmax(0, 1fr)
+    "ratebar ratebar" 64px
+    / minmax(0, 1fr) 400px;
+}
+.toolbar {
+  grid-area: toolbar; display: flex; gap: 10px; align-items: center;
+  padding: 0 14px; border-bottom: 1px solid ${border}; background: ${panel};
+}
+.brain { grid-area: brain; overflow-y: auto; padding: 14px; }
+.side { grid-area: side; overflow-y: auto; padding: 12px; border-left: 1px solid ${border}; }
+.ratebar {
+  grid-area: ratebar; display: flex; align-items: center; gap: 18px;
+  padding: 0 16px; background: ${panel}; border-top: 1px solid ${border};
+}
+.ratebar .rate-buttons { flex: 0 0 480px; }
+.progress { color: ${muted}; font-size: 12px; margin-left: auto; }
+.axis-btns { display: flex; gap: 6px; margin-bottom: 10px; }
+.axis-btn {
+  background: none; border: 1px solid ${border}; border-radius: 6px;
+  color: ${muted}; padding: 3px 12px; cursor: pointer; font: inherit; font-size: 12px;
+}
+.axis-btn.active { color: ${text}; background: ${panel2}; border-color: ${accent}; }
+[data-axis-img] { display: none; max-width: 908px; }
+[data-axis-img].active { display: block; }
+.strip-legend { color: ${muted}; font-size: 11px; margin-top: 4px; }
+""").substitute(
+        border=C_BORDER,
+        panel=C_PANEL,
+        panel2=C_PANEL2,
+        muted=C_MUTED,
+        text=C_TEXT,
+        accent=C_ACCENT,
+    )
+    axes = (
+        ("axial", "lightbox_uri"),
+        ("coronal", "lightbox_cor_uri"),
+        ("sagittal", "lightbox_sag_uri"),
+    )
+    sections = []
+    for p in partials:
+        axis_btns = "".join(
+            f'<button class="axis-btn{" active" if name == "axial" else ""}" '
+            f'data-axis-btn="{name}">{name}</button>'
+            for name, _ in axes
+        )
+        axis_imgs = "".join(
+            f'<img class="montage{" active" if name == "axial" else ""}" '
+            f'data-axis-img="{name}" src="{getattr(p, attr)}" alt="{name} lightbox">'
+            for name, attr in axes
+        )
+        sections.append(
+            f'<section data-ic-section="{p.ic}">'
+            + toolbar_html(p, n_total, tr)
+            + '<div class="brain">'
+            + f'<div class="axis-btns">{axis_btns}</div>'
+            + axis_imgs
+            + f'<div class="montage-caption">{MONTAGE_CAPTION_C}</div>'
+            + "</div>"
+            + '<div class="side">'
+            + '<div class="card"><div class="card-title">FIX verdict '
+            + f'<span class="meta-chip">{FIX_REVIEWER}</span></div>'
+            + f"<div>{verdict_chip_html(p.verdict)}</div>{p.prob_strip_rated}"
+            + '<div class="strip-legend">tall tick = rated (color = human label) · '
+            + "faint tick = unrated (FIX label) · dot = this IC</div></div>"
+            + f'<div class="card"><div class="card-title">timecourse + motion</div>{p.tc_fd_narrow}</div>'
+            + f'<div class="card"><div class="card-title">spectrum</div>{p.spec_narrow}</div>'
+            + p.metrics_no_pin
+            + "</div>"
+            + '<div class="ratebar">'
+            + rating_buttons_html(ratings.get(p.ic))
+            + f'<span class="progress">{len(ratings)} / {n_total} rated</span>'
+            + "</div>"
+            + "</section>"
+        )
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<title>melrater mockup — variant C</title>"
+        f"<style>{css}</style></head><body>"
+        + tabs_html(partials, "C · merged", n_total)
+        + "".join(sections)
+        + f"<script>{JS_SHARED.substitute(ics=', '.join(str(p.ic) for p in partials))}</script>"
+        "</body></html>"
+    )
+
+
 # --------------------------------------------------------------------------
 # MAIN
 # --------------------------------------------------------------------------
@@ -1209,9 +1377,17 @@ def main() -> None:
     mask = canonical_vol(mask_img)
     inside = bg[mask > 0]
     window = (float(np.percentile(inside, 2)), float(np.percentile(inside, 98)))
-    lightbox_zs, strip_zs = slice_picks(mask)
+    lightbox_zs = axis_picks(mask, 2, N_LIGHTBOX)
+    strip_zs = axis_picks(mask, 2, N_STRIP)
+    cor_picks = axis_picks(mask, 1, N_LIGHTBOX)
+    sag_picks = axis_picks(mask, 0, N_LIGHTBOX)
+    ratings = mock_user_ratings(verdicts)
     print(
         f"axial slices: lightbox {lightbox_zs[0]}..{lightbox_zs[-1]} (n={len(lightbox_zs)}), strip n={len(strip_zs)}"
+    )
+    print(
+        f"coronal picks n={len(cor_picks)}, sagittal picks n={len(sag_picks)} | "
+        f"mock ratings: {len(ratings)} ICs, overrides {MOCK_RATING_OVERRIDES}"
     )
 
     partials = []
@@ -1232,6 +1408,9 @@ def main() -> None:
             ic_img,
             lightbox_zs,
             strip_zs,
+            cor_picks,
+            sag_picks,
+            ratings,
         )
         row = ic - 1
         outs = outlier_indices(table, row)
@@ -1244,7 +1423,12 @@ def main() -> None:
 
     html_a = build_variant_a(partials, n_ic, tr)
     html_b = build_variant_b(partials, n_ic, verdicts, icstats, tr)
-    for name, html in (("variant_a.html", html_a), ("variant_b.html", html_b)):
+    html_c = build_variant_c(partials, n_ic, tr, ratings)
+    for name, html in (
+        ("variant_a.html", html_a),
+        ("variant_b.html", html_b),
+        ("variant_c.html", html_c),
+    ):
         out = OUT_DIR / name
         out.write_text(html)
         print(f"wrote {out} ({len(html) / 1e6:.2f} MB)")
