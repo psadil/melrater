@@ -25,6 +25,24 @@ ALLOWED_HOSTS = os.environ.get("MELRATER_ALLOWED_HOSTS", "localhost,127.0.0.1").
     ","
 )
 
+# Behind a TLS-terminating proxy Django sees plain http, so its CSRF origin check
+# compares the browser's https Origin against an http one and rejects every POST
+# — rating included. CSRF_TRUSTED_ORIGINS is the fix; SECURE_PROXY_SSL_HEADER
+# additionally makes request.is_secure() tell the truth, so the secure cookies
+# are actually set. Both are inert unless the deployment sets the variables.
+# Comma-separated, scheme included, no spaces (nothing here strips).
+CSRF_TRUSTED_ORIGINS = [
+    origin
+    for origin in os.environ.get("MELRATER_CSRF_TRUSTED_ORIGINS", "").split(",")
+    if origin
+]
+if os.environ.get("MELRATER_BEHIND_TLS_PROXY") == "1":
+    # Trustworthy only because the app port is never published: the proxy always
+    # overwrites X-Forwarded-Proto, and nothing else can reach the app server.
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -109,6 +127,31 @@ MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# With DEBUG off, Django's default `django` logger keeps its console handler
+# behind RequireDebugTrue and its only other handler mails ADMINS, which is
+# empty — so a 500 in a container renders a bare error page and leaves nothing
+# whatsoever in `docker logs`. Send tracebacks to stderr instead.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "plain": {"format": "%(asctime)s %(levelname)s %(name)s %(message)s"}
+    },
+    "handlers": {"stderr": {"class": "logging.StreamHandler", "formatter": "plain"}},
+    "loggers": {
+        "django.request": {
+            "handlers": ["stderr"],
+            "level": "ERROR",
+            "propagate": False,
+        },
+        "django.security": {
+            "handlers": ["stderr"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+    },
+}
 
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "run-list"
