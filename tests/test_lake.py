@@ -39,6 +39,7 @@ def assemble(**overrides) -> lake.DiscoveredRun:
         "unresolved": {},
         "classifications": (Path("/data") / RUN_DIR / "fix4melview_A_thr1.txt",),
         "motion": np.zeros((5, 6)),
+        "icstats": np.zeros((3, 2)),
     }
     kwargs.update(overrides)
     return lake._assemble(**kwargs)
@@ -120,5 +121,43 @@ def test_unreadable_motion_row_yields_no_inputs() -> None:
     motion[2, :] = np.nan
 
     run = assemble(motion=motion)
+
+    assert run.inputs is None
+
+
+def test_icstats_array_is_carried_over() -> None:
+    # Arrange
+    icstats = np.arange(6.0).reshape(3, 2)
+
+    # Act
+    run = assemble(icstats=icstats)
+
+    # Assert
+    assert run.inputs is not None and run.inputs.icstats is icstats
+
+
+def test_absent_icstats_rows_are_reported() -> None:
+    run = assemble(icstats=None)
+
+    assert run.problems == ("feat_icstats has no rows for the icstats file",)
+
+
+def test_unreadable_icstats_row_is_reported() -> None:
+    # Arrange: one NULL ICstats line, back from the catalog as a NaN row
+    icstats = np.zeros((3, 2))
+    icstats[1, :] = np.nan
+
+    # Act
+    run = assemble(icstats=icstats)
+
+    # Assert
+    assert run.problems == ("feat_icstats has 1 unreadable row(s)",)
+
+
+def test_unreadable_icstats_row_yields_no_inputs() -> None:
+    icstats = np.zeros((3, 2))
+    icstats[1, :] = np.nan
+
+    run = assemble(icstats=icstats)
 
     assert run.inputs is None

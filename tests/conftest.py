@@ -65,8 +65,9 @@ def run_inputs(root: Path):
     """The RunInputs a catalog would resolve for the synthetic directory.
 
     A plain factory rather than a fixture so tests can point individual
-    entries elsewhere; motion comes from the .par exactly as the catalog's
-    feat_motion table would hold it.
+    entries elsewhere; the motion and ICstats arrays come from the files
+    exactly as the catalog's feat_motion/feat_icstats tables would hold them
+    (feat_icstats stores only the required explained/total variance pair).
     """
     from melrater.core import melodic
 
@@ -77,13 +78,13 @@ def run_inputs(root: Path):
         bold=root / "filtered_func_data.nii.gz",
         mix=ica / "melodic_mix",
         ftmix=ica / "melodic_FTmix",
-        icstats=ica / "melodic_ICstats",
         features=root / "fix" / "features.csv",
         ic=ica / "melodic_IC.nii.gz",
         mean=ica / "mean.nii.gz",
         mask=root / "mask.nii.gz",
         classifications=(root / "fix4melview_TestModel_thr5.txt",),
         motion=np.loadtxt(root / "mc" / "prefiltered_func_data_mcf.par"),
+        icstats=np.loadtxt(ica / "melodic_ICstats")[:, :2],
     )
 
 

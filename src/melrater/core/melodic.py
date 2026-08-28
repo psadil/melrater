@@ -39,11 +39,12 @@ class FixResult:
 
 @dataclass(frozen=True)
 class RunInputs:
-    """One run's resolved inputs: local paths, plus the catalog-read motion.
+    """One run's resolved inputs: local paths, plus the catalog-read tables.
 
-    The motion parameters arrive as an array rather than a path because the
-    catalog ingests the ``.par`` file into its ``feat_motion`` table — there
-    is no file left to parse, only rows to read (see lake.py).
+    The motion parameters and per-component stats arrive as arrays rather
+    than paths because the catalog ingests the ``.par`` and ``melodic_ICstats``
+    files into its ``feat_motion``/``feat_icstats`` tables — there is nothing
+    left to parse, only rows to read (see lake.py).
     """
 
     root: Path  # the run directory itself (stored as Run.path)
@@ -51,13 +52,13 @@ class RunInputs:
     bold: Path  # filtered_func_data.nii.gz — the TR comes from its header
     mix: Path
     ftmix: Path
-    icstats: Path
     features: Path  # fix/features.csv
     ic: Path  # melodic_IC.nii.gz
     mean: Path  # the montage background
     mask: Path  # the montage slice-picking mask
     classifications: tuple[Path, ...]  # fix4melview_*_thr*.txt
     motion: np.ndarray  # (n_timepoints, 6) mcflirt order: 3 rot (rad), 3 trans (mm)
+    icstats: np.ndarray  # (n_components, 2): explained %, total %
 
 
 @dataclass(frozen=True)
@@ -69,7 +70,7 @@ class MelodicSource:
     tr: float
     mix: np.ndarray  # (n_timepoints, n_components) IC timecourses
     ftmix: np.ndarray  # (n_bins, n_components) power spectra
-    icstats: np.ndarray  # (n_components, >=2): explained %, total %
+    icstats: np.ndarray  # (n_components, 2): explained %, total %
     fd: np.ndarray  # (n_timepoints,) framewise displacement (mm)
     frequencies: np.ndarray  # (n_bins,) Hz
     feature_names: list[str]
@@ -140,7 +141,7 @@ def parse_fix_file(path: Path) -> FixResult:
 def load_run(inputs: RunInputs) -> MelodicSource:
     mix = np.loadtxt(inputs.mix)
     ftmix = np.loadtxt(inputs.ftmix)
-    icstats = np.loadtxt(inputs.icstats)
+    icstats = inputs.icstats
     if mix.shape[1] != ftmix.shape[1] or mix.shape[1] != icstats.shape[0]:
         raise ValueError(
             f"inconsistent component counts in {inputs.label}: "

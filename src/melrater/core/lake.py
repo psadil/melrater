@@ -3,8 +3,9 @@
 The catalog is the source of truth for which files belong to which run: one
 sibling-resolving query returns every MELODIC run with all of its per-run
 inputs, the fix4melview classification files come back grouped per run, and
-the motion parameters are read from the catalog's ``feat_motion`` table rather
-than re-parsed from the ``.par`` file. Callers get back local paths and arrays
+the motion parameters and per-component variance stats are read from the
+catalog's ``feat_motion``/``feat_icstats`` tables rather than re-parsed from
+the files. Callers get back local paths and arrays
 (:class:`melodic.RunInputs`); a role that resolves to anything other than
 exactly one file is reported as a problem, never guessed at.
 
@@ -24,10 +25,10 @@ from typing import Any
 
 import bidslake
 import numpy as np
-from sqlalchemy import ColumnElement, select, true
+from sqlalchemy import ColumnElement, FromClause, select, true
 
 from melrater.core import melodic
-from melrater.core._lake_models import AllFiles, FeatMotion
+from melrater.core._lake_models import AllFiles, FeatIcstats, FeatMotion
 
 #: Columns that identify one run. `dataset_id` keeps sibling matching inside
 #: the anchor's own dataset — subject labels are only unique within one.
@@ -35,6 +36,8 @@ UNIT = ("dataset_id", "sub", "ses", "task", "run")
 
 #: Sibling filters per input, from the feat adapter's vocabulary. Extensionless
 #: matrix files pin `extension` to NULL so a stray `melodic_mix.bak` never pairs.
+#: The motion and icstats roles resolve their files only for the table key
+#: (file_id): the contents come from feat_motion/feat_icstats, not the paths.
 _ROLES: dict[str, dict[str, str | None]] = {
     "bold": {"suffix": "bold", "desc": "filtered", "extension": ".nii.gz"},
     "ftmix": {"suffix": "spectrum", "desc": "MELODIC", "extension": None},
@@ -47,6 +50,11 @@ _ROLES: dict[str, dict[str, str | None]] = {
 }
 
 _MOTION_COLUMNS = ("rot_x", "rot_y", "rot_z", "trans_x", "trans_y", "trans_z")
+
+#: The required pair only: melrater consumes explained/total variance, and the
+#: optional signal-change columns are legitimately NULL in two-column ICstats
+#: files — fetching them would make a healthy run look gap-ridden.
+_ICSTATS_COLUMNS = ("explained_variance", "total_variance")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -83,8 +91,8 @@ def discover_runs(
     """Every MELODIC run in the catalog matching the entity filters.
 
     Anchored on the mixing matrix (one per run) with every other input resolved
-    as a sibling in the same query; classifications and motion rows follow in
-    one query each, so a whole catalog costs three round-trips.
+    as a sibling in the same query; classifications, motion rows, and ICstats
+    rows follow in one query each, so a whole catalog costs four round-trips.
     """
     filters = {
         k: v
@@ -93,8 +101,18 @@ def discover_runs(
     }
     rows = _unit_rows(lake, filters)
     classifications = _classifications_by_unit(lake, filters)
-    motion_ids = [_role_file_id(row, "motion") for row in rows if row["motion__n"] == 1]
-    motion = _motion_by_file_id(lake, [fid for fid in motion_ids if fid is not None])
+    motion = _rows_by_file_id(
+        lake,
+        FeatMotion.__table__,
+        _MOTION_COLUMNS,
+        [fid for row in rows if (fid := _role_file_id(row, "motion")) is not None],
+    )
+    icstats = _rows_by_file_id(
+        lake,
+        FeatIcstats.__table__,
+        _ICSTATS_COLUMNS,
+        [fid for row in rows if (fid := _role_file_id(row, "icstats")) is not None],
+    )
 
     out: list[DiscoveredRun] = []
     for row in rows:
@@ -107,6 +125,7 @@ def discover_runs(
             for name in _ROLES
         }
         fid = _role_file_id(row, "motion")
+        sid = _role_file_id(row, "icstats")
         out.append(
             _assemble(
                 anchor_path=row["file_path"],
@@ -115,6 +134,7 @@ def discover_runs(
                 unresolved=bidslake.unresolved(row, _ROLES),
                 classifications=classifications.get(_unit_key(row), ()),
                 motion=motion.get(fid) if fid is not None else None,
+                icstats=icstats.get(sid) if sid is not None else None,
             )
         )
     return sorted(out, key=lambda r: r.label)
@@ -162,24 +182,27 @@ def _classifications_by_unit(
     return {key: tuple(paths) for key, paths in grouped.items()}
 
 
-def _motion_by_file_id(
-    lake: bidslake.BidsLake, file_ids: Sequence[str]
+def _rows_by_file_id(
+    lake: bidslake.BidsLake,
+    table: FromClause,
+    columns: Sequence[str],
+    file_ids: Sequence[str],
 ) -> dict[str, np.ndarray]:
-    """file_id -> (n_volumes, 6) motion parameters in mcflirt column order.
+    """file_id -> (n_rows, len(columns)) from a row-ordered ingested table.
 
-    A malformed `.par` line is a NULL row in `feat_motion` (holding its
-    ordinal); it comes back as NaN here and `_assemble` reports it.
+    A malformed source line is a NULL row in the table (holding its ordinal);
+    it comes back as NaN here and `_assemble` reports it.
     """
     if not file_ids:
         return {}
-    m = FeatMotion.__table__.alias("m")
+    m = table.alias("m")
     stmt = (
-        select(m.c.file_id, *[m.c[k] for k in _MOTION_COLUMNS])
+        select(m.c.file_id, *[m.c[k] for k in columns])
         .where(m.c.file_id.in_(list(file_ids)))
         .order_by(m.c.file_id, m.c.row_idx)
     )
     return {
-        key[0]: frame.select(_MOTION_COLUMNS).to_numpy()
+        key[0]: frame.select(columns).to_numpy()
         for key, frame in lake.sql(stmt).partition_by(["file_id"], as_dict=True).items()
     }
 
@@ -204,6 +227,7 @@ def _assemble(
     unresolved: Mapping[str, int],
     classifications: Sequence[Path],
     motion: np.ndarray | None,
+    icstats: np.ndarray | None,
 ) -> DiscoveredRun:
     """Pure assembly of one row's resolutions into a DiscoveredRun."""
     # the anchor is <run dir>/filtered_func_data.ica/melodic_mix
@@ -213,14 +237,22 @@ def _assemble(
         f"{name} matched nothing" if n == 0 else f"{name} was ambiguous ({n} matches)"
         for name, n in sorted(unresolved.items())
     ]
-    if not problems and motion is None:
-        problems.append("feat_motion has no rows for the motion file")
-    if motion is not None:
-        gaps = int(np.isnan(motion).any(axis=1).sum())
-        if gaps:
-            problems.append(f"feat_motion has {gaps} unreadable row(s)")
+    for table, name, data in (
+        ("feat_motion", "motion", motion),
+        ("feat_icstats", "icstats", icstats),
+    ):
+        # a resolved file with no table rows means the catalog never read it
+        # (e.g. indexed by a bidslake without that table); an unresolved role
+        # is already reported above
+        if data is None:
+            if name not in unresolved:
+                problems.append(f"{table} has no rows for the {name} file")
+        else:
+            gaps = int(np.isnan(data).any(axis=1).sum())
+            if gaps:
+                problems.append(f"{table} has {gaps} unreadable row(s)")
     resolved = {name: path for name, path in roles.items() if path is not None}
-    if problems or motion is None:
+    if problems or motion is None or icstats is None:
         return DiscoveredRun(
             label=label, root=root, inputs=None, problems=tuple(problems)
         )
@@ -230,12 +262,12 @@ def _assemble(
         bold=resolved["bold"],
         mix=anchor_local,
         ftmix=resolved["ftmix"],
-        icstats=resolved["icstats"],
         features=resolved["features"],
         ic=resolved["ic"],
         mean=resolved["mean"],
         mask=resolved["mask"],
         classifications=tuple(classifications),
         motion=motion,
+        icstats=icstats,
     )
     return DiscoveredRun(label=label, root=root, inputs=inputs)

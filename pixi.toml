@@ -62,13 +62,13 @@ maturin = ">=1.7,<2"
 # conda-forge pillow is not built against libavif; this plugin supplies the codec
 pillow-avif-plugin = "*"
 django-typer = "*"
-# bidslake query layer: typed access to the catalog `import_run` reads. Points at
-# the sibling checkout while the feat-adapter additions melrater needs (the
-# `spectrum`/`metrics` suffixes and the melodic_ftmix/melodic_icstats/
-# melodic_mean/fix_features roles) live on its feat/melodic-rating-slots branch;
-# once that lands upstream, pin a git rev instead (dirt-style):
-#   bidslake = { git = "https://github.com/psadil/bidslake.git", rev = "<sha>", subdirectory = "crates/bidslake-py" }
-bidslake = { path = "../bidslake/crates/bidslake-py" }
+# bidslake query layer: typed access to the catalog `import_run` reads, pinned to
+# a rev (built from git via maturin/rust at install time). The pin is the first
+# rev whose feat adapter carries everything melrater needs: the
+# `spectrum`/`metrics` suffixes, the melodic_ftmix/melodic_icstats/melodic_mean/
+# fix_features roles, and the `feat_icstats` table. Catalogs must be indexed with
+# a `bidslake` CLI built from this rev or later.
+bidslake = { git = "https://github.com/psadil/bidslake.git", rev = "93d6e6dfa6a65dc667b256d8365220adf04c7951", subdirectory = "crates/bidslake-py" }
 
 [feature.dev.tasks]
 test = "pytest"

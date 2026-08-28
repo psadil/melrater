@@ -48,8 +48,9 @@ then hand the catalog to `import_run`:
 pixi run manage import_run study.duckdb
 ```
 
-Every MELODIC run the catalog knows is ingested (the motion parameters come
-straight from the catalog's `feat_motion` table). Already-ingested runs are
+Every MELODIC run the catalog knows is ingested (the motion parameters and
+per-component variance stats come straight from the catalog's
+`feat_motion`/`feat_icstats` tables). Already-ingested runs are
 skipped, and a run with missing or ambiguous inputs is reported and skipped
 rather than guessed at. `--sub/--ses/--task/--run` narrow the import;
 `--base-dir` rebases the catalog's roots when the data moved after indexing.

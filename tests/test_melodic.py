@@ -137,3 +137,13 @@ def test_load_run_rejects_motion_volume_mismatch(melodic_dir: Path) -> None:
     # Act / Assert
     with pytest.raises(ValueError, match="motion rows"):
         melodic.load_run(short)
+
+
+def test_load_run_rejects_icstats_component_mismatch(melodic_dir: Path) -> None:
+    # Arrange: one ICstats row too few for the mix's components
+    inputs = run_inputs(melodic_dir)
+    short = dataclasses.replace(inputs, icstats=inputs.icstats[:-1])
+
+    # Act / Assert
+    with pytest.raises(ValueError, match="component counts"):
+        melodic.load_run(short)
