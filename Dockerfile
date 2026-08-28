@@ -5,7 +5,7 @@
 # lake.py), so a bidslake-free web environment does not exist here.
 #
 #   docker buildx build --platform=linux/amd64 \
-#     --provenance=mode=max --sbom=true -t ghcr.io/psadil/melrater .
+#     --provenance=mode=max --sbom=true -t psadil/melrater .
 #
 # mode=max (rather than the default min) embeds the Dockerfile source, all ten
 # build steps and one further digest-pinned base image; both modes record the
