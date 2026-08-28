@@ -368,6 +368,15 @@ COLUMNS: dict[str, dict[str, str]] = {
         "trial_type": "VARCHAR",
         "other_data": "JSON",
     },
+    "feat_icstats": {
+        "file_id": "UUID",
+        "row_idx": "BIGINT",
+        "explained_variance": "DOUBLE",
+        "total_variance": "DOUBLE",
+        "signal_change_pos": "DOUBLE",
+        "signal_change_neg": "DOUBLE",
+        "other_data": "JSON",
+    },
     "feat_motion": {
         "file_id": "UUID",
         "row_idx": "BIGINT",
@@ -1326,6 +1335,15 @@ class C:
         response_time: pl.Expr = pl.col("response_time")
         stim_file: pl.Expr = pl.col("stim_file")
         trial_type: pl.Expr = pl.col("trial_type")
+        other_data: pl.Expr = pl.col("other_data")
+
+    class feat_icstats:
+        file_id: pl.Expr = pl.col("file_id")
+        row_idx: pl.Expr = pl.col("row_idx")
+        explained_variance: pl.Expr = pl.col("explained_variance")
+        total_variance: pl.Expr = pl.col("total_variance")
+        signal_change_pos: pl.Expr = pl.col("signal_change_pos")
+        signal_change_neg: pl.Expr = pl.col("signal_change_neg")
         other_data: pl.Expr = pl.col("other_data")
 
     class feat_motion:
@@ -2387,6 +2405,19 @@ class Events(Base):
     response_time: Mapped[float | None] = mapped_column(Float)
     stim_file: Mapped[str | None] = mapped_column(String)
     trial_type: Mapped[str | None] = mapped_column(String)
+    other_data: Mapped[str | None] = mapped_column(String)
+
+
+class FeatIcstats(Base):
+    __tablename__ = "feat_icstats"
+    # A view has no declared key; this one exists only to satisfy the mapper.
+
+    file_id: Mapped[str] = mapped_column(String, primary_key=True)
+    row_idx: Mapped[int | None] = mapped_column(BigInteger)
+    explained_variance: Mapped[float | None] = mapped_column(Float)
+    total_variance: Mapped[float | None] = mapped_column(Float)
+    signal_change_pos: Mapped[float | None] = mapped_column(Float)
+    signal_change_neg: Mapped[float | None] = mapped_column(Float)
     other_data: Mapped[str | None] = mapped_column(String)
 
 
