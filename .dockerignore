@@ -1,0 +1,22 @@
+# .pixi and .git are the size story: without them the build context is ~2.6 GB.
+.pixi
+.git
+.github
+
+# Runtime state. db/ and media/ are mount points in the image and must stay
+# empty in it; media/ in particular is subject-derived and must never reach a
+# registry. Patterns are anchored at the context root and * does not cross /,
+# so the stray src/db/db.sqlite3 needs its own entry — the runtime does
+# `COPY src /app/src`, which would otherwise bake it into a layer.
+db
+src/db
+media
+staticfiles
+
+.env*
+tests
+.pytest_cache
+.ruff_cache
+.vscode
+**/__pycache__
+*.DS_Store
