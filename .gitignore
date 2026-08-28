@@ -14,3 +14,9 @@ staticfiles/
 
 # editory
 .vscode/
+
+# host-only secrets. compose reads .env from the directory it runs in, so the
+# real one lives at /srv/melrater/.env on the server; the committed template is
+# deploy/env.example. Nothing resembling a filled-in .env belongs in the repo.
+.env
+.env.*

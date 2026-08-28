@@ -1,0 +1,28 @@
+# rsynced to /srv/melrater/Caddyfile by deploy/deploy.sh; edit it here, not on
+# the server. {$MELRATER_HOST} is expanded by Caddy's own config adapter from
+# the caddy container's environment (compose passes it in), which is why a
+# changed host needs `docker compose up -d` rather than a `caddy reload`.
+{
+	# Browsers never send SNI when the address bar holds an IP literal (RFC 6066
+	# forbids it), so Caddy gets a ClientHello with no server name and cannot
+	# pick a certificate: the handshake dies with "tlsv1 alert internal error"
+	# and Chrome reports "This site can't provide a secure connection" — even
+	# though the log says the certificate was obtained successfully. This names
+	# the certificate to serve when no SNI arrives. Not optional for IP hosting.
+	default_sni {$MELRATER_HOST}
+
+	# Let's Encrypt issues IP certificates only under the short-lived profile:
+	# 160 hours (~6 days), renewed automatically. Without this block Caddy asks
+	# for an ordinary certificate and Let's Encrypt refuses the IP identifier.
+	cert_issuer acme {
+		profile shortlived
+	}
+}
+
+# The https:// scheme is load-bearing: a bare host leaves Caddy to guess, and a
+# *domain* here would turn on automatic HTTPS with a catch-all redirect that
+# sends IP-addressed requests to an endpoint holding no certificate for them.
+https://{$MELRATER_HOST} {
+	encode zstd gzip
+	reverse_proxy melrater:8000
+}
