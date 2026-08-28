@@ -71,6 +71,19 @@ Human ratings are stored per user; the P(signal) strip in the verdict card
 colors each component by its human rating once one exists, so disagreements
 with FIX stand out as a color on the wrong side of the threshold line.
 
+## Deploy
+
+The app also runs from a container: one image that both serves and runs
+management commands, with the SQLite database and the rendered montages as
+host bind mounts.
+
+```sh
+docker buildx build --platform=linux/amd64 --provenance=mode=max --sbom=true -t melrater .
+```
+
+See [deploy.md](deploy.md) for the rest — where the database goes, how to move
+it without losing WAL contents, and the Hetzner-side commands.
+
 ## Development
 
 ```sh
