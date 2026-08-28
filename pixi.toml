@@ -2,7 +2,7 @@
 authors = ["Patrick Sadil <psadil@gmail.com>"]
 channels = ["conda-forge"]
 name = "melrater"
-platforms = ["osx-arm64"]
+platforms = ["osx-arm64", "linux-64"]
 version = "0.1.0"
 
 # applies to every task and pixi shell: puts the src/ layout on the import
@@ -57,6 +57,15 @@ uvloop = ">=0.22"
 # compiled at install time)
 rust = "*"
 maturin = ">=1.7,<2"
+
+# linux only: conda's C/C++ toolchain. bidslake is a maturin/PyO3 extension whose
+# duckdb backend is compiled from bundled C++ by cc-rs, so the container build
+# needs a compiler; taking it from conda keeps that C++ and conda's rust linker
+# on one sysroot (a system gcc resolves against Ubuntu's newer glibc instead and
+# leaves undefined __isoc23_* symbols behind). macOS uses the Xcode clang.
+[target.linux-64.dependencies]
+gcc_linux-64 = "*"
+gxx_linux-64 = "*"
 
 [pypi-dependencies]
 # conda-forge pillow is not built against libavif; this plugin supplies the codec
