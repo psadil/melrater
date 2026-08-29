@@ -67,7 +67,7 @@ renewal silently, about 48 hours later.
 
 A `/32` SSH source locks you out when a dynamic address changes, so narrow it in
 two steps: create the firewall with 22 open to `0.0.0.0/0`, confirm §1.3's
-`ssh melrater-box` works, *then* narrow from a session where a mistake is
+`ssh hetzner` works, *then* narrow from a session where a mistake is
 instantly visible and instantly revertible. Key-only authentication is on from
 first boot either way. The tell months later: SSH that starts timing out is
 almost always your own address changing, not a dead box.
@@ -106,7 +106,7 @@ rather than trusting this table; Hetzner's line-up moves.
 | SSH key    | public half of `~/.ssh/id_ed25519`     | The console cannot add one afterwards, and it means no root password is ever mailed |
 | Firewall   | the one from §1.1                      | Attached at creation, as above |
 | Volume     | none                                   | See below |
-| Name       | `melrater-box`                         | Same string as the `Host` alias in §1.3 and `deploy.sh`'s default target |
+| Name       | `hetzner`                         | Same string as the `Host` alias in §1.3 and `deploy.sh`'s default target |
 
 **CX23, not CAX11.** They sit next to each other in the picker, are identically
 specced, and are cents apart — but CAX is Ampere arm64. `pixi.lock` resolves
@@ -134,13 +134,13 @@ Give the box a name so the rest of this document is literal rather than a
 placeholder. In `~/.ssh/config`:
 
 ```
-Host melrater-box
+Host hetzner
     HostName 2.29.21.207
     User root
     IdentityFile ~/.ssh/id_ed25519
 ```
 
-`ssh melrater-box` from here on, and `deploy.sh` picks the same name up by
+`ssh hetzner` from here on, and `deploy.sh` picks the same name up by
 default. Resist the temptation to also add a fake hostname to `/etc/hosts`: it
 would work for SSH while `MELRATER_ALLOWED_HOSTS`, `default_sni` and the Caddy
 site address all still need the literal IP, and pasting the hostname into one of
@@ -154,7 +154,7 @@ the one the Hetzner console shows rather than accepting it blind:
 
 ```bash
 ssh-keygen -R 2.29.21.207
-ssh melrater-box
+ssh hetzner
 ```
 
 Skip it and §1.4's `apt-get update` is the first thing to fail — followed by
@@ -234,7 +234,7 @@ everyone out.
 The address is typed by hand in exactly two places: `HostName` in
 `~/.ssh/config` (§1.3 — how this laptop reaches the box) and `MELRATER_HOST`
 here (what the app answers to). Everything else derives: every `ssh` and `rsync`
-goes through the `melrater-box` alias, and `compose.yaml` and the `Caddyfile`
+goes through the `hetzner` alias, and `compose.yaml` and the `Caddyfile`
 both read this file. That is why §1.2 keeps the Primary IP — a new address is
 those two lines plus `ssh-keygen -R`, and nothing else. The `grep` above is worth
 the second it costs: `${VAR:?}` catches an *unset* variable, never a wrong one,
@@ -321,7 +321,7 @@ still say `(health: starting)`: the first probe does not run until 30 s in.
 Watch the certificate arrive while you wait:
 
 ```bash
-ssh melrater-box 'cd /srv/melrater && docker compose logs -f caddy'
+ssh hetzner 'cd /srv/melrater && docker compose logs -f caddy'
 ```
 
 `certificate obtained successfully`, then **<https://2.29.21.207/>** should
@@ -357,7 +357,7 @@ SQLite is in WAL mode, so `scp db/db.sqlite3` silently leaves behind whatever is
 still in the `-wal` sidecar. `VACUUM INTO` writes one consistent file, and is
 safe even against a running app. Check it fits first — the montages land in
 `/tmp` before moving into place, so the box needs about twice their size free:
-`du -sh media/` here against `ssh melrater-box df -h /`.
+`du -sh media/` here against `ssh hetzner df -h /`.
 
 ```bash
 # [laptop]
@@ -365,8 +365,8 @@ cd ~/git/neuro/melrater      # db/ and media/ are relative paths, and both are g
 rm -f /tmp/melrater-xfer.sqlite3
 sqlite3 db/db.sqlite3 "VACUUM INTO '/tmp/melrater-xfer.sqlite3'"
 
-rsync -avz /tmp/melrater-xfer.sqlite3 melrater-box:/tmp/db.sqlite3
-rsync -avz --delete media/ melrater-box:/tmp/media/          # trailing slash matters
+rsync -avze ssh /tmp/melrater-xfer.sqlite3 hetzner:/tmp/db.sqlite3
+rsync -avze ssh --delete media/ hetzner:/tmp/media/
 ```
 
 At a few hundred runs `media/` is ~86,000 files, and rsync pays a round trip per
@@ -374,7 +374,7 @@ file. If that push is slow, stream it as one archive instead — and note this i
 the *only* time you move media this way; §6 handles everything afterwards:
 
 ```bash
-tar -C media -cf - . | ssh melrater-box 'mkdir -p /tmp/media && tar -C /tmp/media -xf -'
+tar -C media -cf - . | ssh hetzner 'mkdir -p /tmp/media && tar -C /tmp/media -xf -'
 ```
 
 Installing it on the server has one non-obvious hazard, so the whole sequence
@@ -411,7 +411,9 @@ removes the `-wal`, so on a first deploy it does not fire at all. This is the
 block a later re-sync re-runs unchanged; only the contents differ.
 
 Your local users come with the database — `auth_user` is in that same file — so
-whatever accounts exist on the laptop exist here. Reviewer accounts are made
+whatever accounts exist on the laptop exist here, and none that do not. If the
+laptop database has no superuser, neither does this one; see "Is there an admin
+account?" below for whether that matters. Reviewer accounts are made
 with `create_rater` (see "Operating it"), on whichever side is authoritative at
 the time; after this push, that is the server. Note that ingest cannot run here:
 it needs the bidslake catalog and the raw NIfTIs, which is what §6 works around.
@@ -427,9 +429,9 @@ dockerd starting at boot is what provides this — no systemd unit is involved.
 Prove it once:
 
 ```bash
-ssh melrater-box reboot
+ssh hetzner reboot
 # wait ~15 s
-ssh melrater-box 'docker ps --format "{{.Names}}\t{{.Status}}"'
+ssh hetzner 'docker ps --format "{{.Names}}\t{{.Status}}"'
 #   expect: melrater-melrater-1   Up ... (healthy)
 #           melrater-caddy-1      Up ...
 curl -sI https://2.29.21.207/ | head -1        # expect 302
@@ -461,7 +463,7 @@ command to go wrong.
 pixi run manage import_run study.duckdb
 pixi run manage export_runs 301 302 303 --out ./outgoing
 
-rsync -av ./outgoing/ melrater-box:/srv/melrater/incoming/
+rsync -av ./outgoing/ hetzner:/srv/melrater/incoming/
 ```
 
 On a box provisioned before this section existed, create the directory first —
@@ -519,12 +521,32 @@ so re-issuing means `create_rater alice --reset`.
 
 Reviewers are deliberately not superusers, so **do not** use `createsuperuser`
 for them: a Django admin can read, rewrite and delete everyone else's ratings,
-and delete the accounts that made them. Keep `createsuperuser` for the one
-administrative account, and keep out of it day to day.
+and delete the accounts that made them.
+
+### Is there an admin account?
+
+Not unless you make one. A database built by the entrypoint's `migrate` has no
+superuser, and `create_rater` never creates one, so `/admin/` is a door nobody
+can open. That is a reasonable place to stay: the app never needs it, and
+`python -m django shell` can do anything the admin can.
+
+Make one only if you want the browsable interface, and keep out of it day to day:
+
+```bash
+docker compose run --rm melrater python -m django createsuperuser
+```
+
+There is no half-measure to reach for — `is_staff` on its own carries no model
+permissions, so such an account logs in to an empty admin.
 
 Deleting a reviewer who has rated anything now raises `ProtectedError` rather
-than quietly cascading their ratings away. If an account really must go,
-disable it (`is_active = False` in the admin) and leave the rows alone.
+than quietly cascading their ratings away. If an account really must go, disable
+it and leave the rows alone — no admin required:
+
+```bash
+docker compose run --rm melrater python -m django shell -c \
+  "from django.contrib.auth.models import User; User.objects.filter(username='alice').update(is_active=False)"
+```
 
 ### Login throttling
 
@@ -546,8 +568,8 @@ preferring, since a recreate is a moment where a box with an expired short-lived
 certificate re-enters issuance:
 
 ```bash
-rsync -av deploy/Caddyfile melrater-box:/srv/melrater/        # [laptop]
-ssh melrater-box 'cd /srv/melrater && docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile'
+rsync -av deploy/Caddyfile hetzner:/srv/melrater/        # [laptop]
+ssh hetzner 'cd /srv/melrater && docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile'
 ```
 
 A changed `MELRATER_HOST` is the exception: `reload` re-adapts against the
@@ -572,7 +594,7 @@ Backups on the same disk as the database are not backups. Pull a copy down
 periodically:
 
 ```bash
-rsync -av melrater-box:/srv/melrater/backups/ ~/melrater-backups/    # [laptop]
+rsync -av hetzner:/srv/melrater/backups/ ~/melrater-backups/    # [laptop]
 ```
 
 ### Plain HTTP, no proxy (debugging only)
@@ -592,7 +614,7 @@ docker run -d --name melrater \
   -p 127.0.0.1:8000:8000 \
   psadil/melrater:latest
 
-ssh -N -L 8000:127.0.0.1:8000 melrater-box    # [laptop] then http://127.0.0.1:8000/
+ssh -N -L 8000:127.0.0.1:8000 hetzner    # [laptop] then http://127.0.0.1:8000/
 ```
 
 Tear it down before starting the real stack. Compose names its container

@@ -27,9 +27,13 @@ pixi run manage create_rater <username>   # prints a generated password, once
 
 `create_rater` makes an ordinary reviewer account. Reviewers never choose or
 reset their own password — there is no reset page — so re-issuing is
-`create_rater <username> --reset`. `createsuperuser` still exists for an
-administrative account, but a reviewer should not have one: a Django admin can
-rewrite and delete everyone else's ratings.
+`create_rater <username> --reset`.
+
+A fresh database has **no superuser**, and none is needed: the app never uses
+the admin, and `pixi run manage shell` does anything it could. Run
+`pixi run manage createsuperuser` only if you want the browsable interface, and
+never for a reviewer — a Django admin can rewrite and delete everyone's
+ratings.
 
 Enable the git hooks (ruff, ty, codespell, Conventional Commits) once:
 

@@ -39,12 +39,6 @@ class Command(TyperCommand):
             bool,
             typer.Option(help="Issue a new password for an account that exists."),
         ] = False,
-        staff: t.Annotated[
-            bool,
-            typer.Option(
-                help="Also grant Django admin access (reviewers do not need it)."
-            ),
-        ] = False,
     ) -> None:
         """Create a reviewer account and print its generated password."""
         if length < 12:
@@ -59,11 +53,11 @@ class Command(TyperCommand):
 
         password = get_random_string(length, ALPHABET)
         if existing is None:
-            # never a superuser: an admin account can read, rewrite and delete
-            # every other reviewer's ratings
-            user = User.objects.create_user(
-                username=username, password=password, is_staff=staff
-            )
+            # Never staff and never a superuser. An admin account can read,
+            # rewrite and delete every other reviewer's ratings; and is_staff on
+            # its own carries no model permissions, so it would only grant a
+            # login to an empty admin. `createsuperuser` is the one way in.
+            user = User.objects.create_user(username=username, password=password)
             action = "created"
         else:
             user = existing
