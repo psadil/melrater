@@ -68,8 +68,15 @@ uvloop = ">=0.22"
 # rather than a string comparison.
 django-environ = ">=0.14"
 # login throttling. The lockout tables are ordinary migrations, so the
-# entrypoint's `migrate` installs them with everything else.
+# entrypoint's `migrate` installs them with everything else. It also covers the
+# ingest API for free: that endpoint authenticates through django.contrib.auth,
+# so AxesStandaloneBackend sees a bad push password like any other bad login.
 django-axes = ">=8.3"
+# the ingest API (melrater/core/api.py) and its client (push.py). django-ninja
+# rather than DRF: two endpoints, pydantic schemas shared with schemas.py, and
+# no serializer layer to duplicate them in.
+django-ninja = ">=1.6"
+httpx = ">=0.28"
 # build toolchain for the bidslake pypi dependency (a PyO3/maturin extension,
 # compiled at install time)
 rust = "*"

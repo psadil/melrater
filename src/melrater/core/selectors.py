@@ -2,19 +2,29 @@
 
 from __future__ import annotations
 
+import io
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import UUID
 
 from django.contrib.auth.models import AbstractBaseUser
 from django.core.paginator import Page, Paginator
 from django.db.models import Count, Min, Q
 
-from melrater.core import montage
+from melrater.core import montage, transfer
 from melrater.core import storage as montage_store
 from melrater.core.charts import ProbEntry
 from melrater.core.models import Classification, Component, Reviewer, Run
-from melrater.core.schemas import ComponentData, RunData
+from melrater.core.schemas import (
+    ComponentData,
+    ComponentPayload,
+    FixReviewerPayload,
+    FixVerdictPayload,
+    RunData,
+    RunPayload,
+    RunSummary,
+)
 
 #: Display order of the montage axes (montage.AXES is keyed by array axis).
 AXIS_ORDER = ("axial", "coronal", "sagittal")
@@ -35,7 +45,7 @@ _LIST_FIELDS = (
     "run",
     "tr",
     "montage_format",
-    "montage_rev",
+    "montage_digest",
 )
 
 
@@ -274,14 +284,15 @@ def prob_entries_for_run(
 def montage_url(run: Run, index: int, axis: str) -> str:
     """URL of one rendered montage.
 
-    The ``?v=`` is the run's montage revision, so a re-render changes every
-    URL — which is what lets the media view answer with an immutable cache
-    header instead of a revalidation per image per component.
+    The run's montage digest is part of the path, so a re-render mints new
+    URLs rather than changing what the old ones mean — which is what lets the
+    media view answer with an immutable cache header instead of a
+    revalidation per image per component.
     """
-    name = montage_store.run_prefix(run.uuid) + montage.montage_name(
-        index, axis, str(run.montage_format)
-    )
-    return f"{montage_store.url(name)}?v={run.montage_rev}"
+    name = montage_store.run_prefix(
+        run.uuid, str(run.montage_digest)
+    ) + montage.montage_name(index, axis, str(run.montage_format))
+    return montage_store.url(name)
 
 
 def montage_urls(component: Component) -> dict[str, str]:
@@ -296,3 +307,112 @@ def user_label_for_component(
         component=component, reviewer__user=user
     ).first()
     return str(cls.label) if cls else None
+
+
+# --- the ingest API's read side ------------------------------------------
+
+
+def run_summaries() -> list[RunSummary]:
+    """Every run this database holds, as the ingest index reports them.
+
+    Deliberately three columns. A client only has to answer "do I need to send
+    this run", and anything more would be telling an ingest credential about
+    the ratings.
+    """
+    return [
+        RunSummary(uuid=uuid, label=label, montage_digest=digest)
+        for uuid, label, digest in Run.objects.order_by("label").values_list(
+            "uuid", "label", "montage_digest"
+        )
+    ]
+
+
+def run_payload(run: Run) -> RunPayload:
+    """One run as the ingest API takes it: rows, components, FIX verdicts.
+
+    Human reviewers have no representation in ``RunPayload`` at all, so this
+    cannot carry a rating even by mistake — the same property `export_runs`
+    used to provide by filtering, now provided by the type.
+    """
+    components = [
+        ComponentPayload.model_validate(component, from_attributes=True)
+        for component in run.components.order_by("index")
+    ]
+    montage_format = str(run.montage_format)
+    if montage_format not in ("avif", "png"):
+        raise ValueError(f"unknown montage format: {montage_format!r}")
+    return RunPayload(
+        uuid=run.uuid,
+        label=str(run.label),
+        path=str(run.path),
+        sub=str(run.sub),
+        ses=str(run.ses),
+        task=str(run.task),
+        run=str(run.run),
+        tr=float(run.tr),
+        n_timepoints=int(run.n_timepoints),
+        fd=list(run.fd),
+        frequencies=list(run.frequencies),
+        metric_stats=run_data(run).metric_stats,
+        montage_format=montage_format,
+        montage_digest=str(run.montage_digest),
+        components=components,
+        fix=_fix_payloads(run),
+    )
+
+
+def _fix_payloads(run: Run) -> list[FixReviewerPayload]:
+    """This run's FIX reviewers, each with its verdicts in component order."""
+    rows = (
+        Classification.objects.filter(
+            component__run=run, reviewer__kind=Reviewer.Kind.FIX
+        )
+        .select_related("reviewer")
+        .order_by("reviewer__name", "component__index")
+    )
+    by_reviewer: dict[int, list[FixVerdictPayload]] = {}
+    reviewers: dict[int, Reviewer] = {}
+    for row in rows:
+        label = str(row.label)
+        if label not in ("Signal", "Noise", "Unknown"):
+            raise ValueError(f"unknown classification label: {label!r}")
+        reviewers.setdefault(row.reviewer.pk, row.reviewer)
+        by_reviewer.setdefault(row.reviewer.pk, []).append(
+            FixVerdictPayload(label=label, probability=row.probability)
+        )
+    return [
+        FixReviewerPayload(
+            model=str(reviewers[pk].fix_model),
+            threshold=reviewers[pk].fix_threshold,
+            verdicts=verdicts,
+        )
+        for pk, verdicts in by_reviewer.items()
+    ]
+
+
+def montage_members(run: Run) -> list[tuple[str, bytes]]:
+    """One run's stored montages as ``(basename, bytes)``, for the push tar."""
+    storage = montage_store.montage_storage()
+    prefix = montage_store.run_prefix(run.uuid, str(run.montage_digest))
+    members = []
+    for name in montage_store.names_for_run(run.uuid, str(run.montage_digest)):
+        with storage.open(name) as handle:
+            members.append((name.removeprefix(prefix), handle.read()))
+    return members
+
+
+def run_by_uuid(run_uuid: UUID) -> Run | None:
+    return Run.objects.filter(uuid=run_uuid).first()
+
+
+def run_bundle(run: Run) -> tuple[bytes, bytes]:
+    """One run as the two file parts of a push: its JSON and its montage tar.
+
+    The tar holds bare montage names — the uuid and digest are in the payload,
+    not the archive — so the receiver decides where the files land and nothing
+    from this side can name a path over there.
+    """
+    payload = run_payload(run).model_dump_json().encode()
+    buffer = io.BytesIO()
+    transfer.write_montage_tar(montage_members(run), buffer)
+    return payload, buffer.getvalue()

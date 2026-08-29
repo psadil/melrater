@@ -17,8 +17,7 @@ and knowing which is which is what makes a redeploy safe:
 | Under `/srv/melrater`       | In the app at | Holds                                        | On redeploy   |
 | --------------------------- | ------------- | -------------------------------------------- | ------------- |
 | `db/`                       | `/app/db`     | `db.sqlite3` + its `-wal`/`-shm` sidecars     | never touched |
-| `media/`                    | `/app/media`  | pre-rendered montages, `runs/<uuid>/*.avif`   | never touched |
-| `incoming/`                 | `/incoming`   | export bundles waiting to be loaded (§6)      | never touched |
+| `media/`                    | `/app/media`  | montages, `runs/<uuid>/<digest>/*.avif`       | never touched |
 | `backups/`, `caddy/`        | —             | nightly dumps; Caddy's certificates           | never touched |
 | `compose.yaml`, `Caddyfile` | —             | rsynced from `deploy/`                        | overwritten   |
 | `.env`                      | —             | written on the box, `chmod 600`               | never touched |
@@ -26,17 +25,19 @@ and knowing which is which is what makes a redeploy safe:
 Everything else — the pixi environment, `src/`, the collected static files — is
 baked into the image and replaced wholesale on redeploy.
 
-Montage paths are derived from `Run.uuid`, not from its primary key, so
-nothing absolute is stored in the database *and* a run keeps its images when it
-is loaded into another database that has already assigned that integer to
-something else. That is what makes §6 possible. `Run.path` does hold the laptop
-path of the source derivatives, but no view dereferences it — only re-ingest and
-`rerender_montages` do, and neither runs on the server.
+Montage paths are `runs/<Run.uuid>/<Run.montage_digest>/`. The uuid, not the
+primary key, because a run pushed into this database is assigned a fresh
+integer id and its images have to survive that — which is what makes §6
+possible. The digest, a fingerprint of the rendered bytes, because it makes a
+re-render additive: the new set is written beside the old one and the old one
+is dropped only once the row points at the new directory. So no montage URL
+ever changes what it means, which is what licenses the one-year `immutable`
+cache header, and there is no revision counter for the two machines to
+disagree about.
 
-Nothing opens those files by path either: montage reads and writes go through
-the `montages` entry in `settings.STORAGES` (`melrater/core/storage.py`), so
-moving them off this disk and into object storage later is a settings change
-rather than a refactor.
+`Run.path` does hold the laptop path of the source derivatives, but no view
+dereferences it — only re-ingest and `rerender_montages` do, and neither runs
+on the server.
 
 ## 1. Create and lock down the box
 
@@ -121,9 +122,9 @@ plans with an equal or larger drive, so the 80 GB taken "to be safe" is
 permanent. The arithmetic on 40: Ubuntu and Docker take ~3 GB; the image is
 2.43 GB *unpacked* (the 535 MiB in §3.1 is the wire size, a different
 measurement) and a redeploy holds two of those until
-`docker image prune -f`; §4 stages montages through `/tmp`, so a media sync
-transiently needs twice their size. That leaves roughly 16 GB of montages, a few
-hundred runs. Skip the external volume for the same reason it is a chore later:
+`docker image prune -f`; an incoming push holds one run's tar in `/tmp` while
+it is read, which is tens of megabytes. That leaves roughly 16 GB of montages,
+a few hundred runs. Skip the external volume for the same reason it is a chore later:
 `compose.yaml` bind-mounts absolute paths, so a volume added afterwards has to be
 mounted at `/srv/melrater` itself — stack stopped, data moved, everything
 re-chowned.
@@ -190,8 +191,8 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.
 apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 ```
 
-`sqlite3` is needed on the host for the backup and for the database swap in §4 —
-the container ships `libsqlite`, not the CLI. `btop` answers "is this box about
+`sqlite3` is needed on the host for the nightly backup — the container ships
+`libsqlite`, not the CLI. `btop` answers "is this box about
 to fall over" and costs nothing. The Docker apt line derives the codename off the
 box, which is why §1.2's image choice is not a preference.
 
@@ -202,15 +203,15 @@ exist here, so chown by number — WAL creates its sidecars *in the directory*, 
 the directory itself must be writable, not just the database file:
 
 ```bash
-mkdir -p /srv/melrater/{db,media,backups,incoming,caddy/data,caddy/config}
+mkdir -p /srv/melrater/{db,media,backups,caddy/data,caddy/config}
 chown -R 57439:57439 /srv/melrater/db /srv/melrater/media /srv/melrater/backups
-chmod 750 /srv/melrater /srv/melrater/{db,media,backups,incoming}
+chmod 750 /srv/melrater /srv/melrater/{db,media,backups}
 ```
 
 `backups` needs the same 750 as the rest: the nightly job below writes a
-complete copy of the database into it. `incoming` holds export bundles on their
-way in (§6) and stays root-owned — the container mounts it read-only. Leave
-`caddy/` root-owned too: that image runs as root.
+complete copy of the database into it. Leave `caddy/` root-owned: that image
+runs as root. There is no `incoming/` — runs arrive over the API (§4), so
+nothing is ever staged on the host.
 
 ### 1.7 The `.env` file [server]
 
@@ -348,75 +349,49 @@ aborts the deploy there. On the registry path that pull is load-bearing:
 compose's default `pull_policy` is `missing`, so `up -d` alone keeps running the
 image already cached under that tag.
 
-## 4. Ship the database and montages
+## 4. Create the accounts and push the runs
 
 The stack has been running since §3 against a database the entrypoint migrated
-and nobody has written to. This replaces that file wholesale.
+and nobody has written to. That database stays: accounts are made here, and
+runs arrive over the API rather than as a copy of the laptop's database. There
+is no direction-of-travel hazard to manage as a result — nothing this section
+does can overwrite a rating, on the first run or the hundredth.
 
-SQLite is in WAL mode, so `scp db/db.sqlite3` silently leaves behind whatever is
-still in the `-wal` sidecar. `VACUUM INTO` writes one consistent file, and is
-safe even against a running app. Check it fits first — the montages land in
-`/tmp` before moving into place, so the box needs about twice their size free:
-`du -sh media/` here against `ssh hetzner df -h /`.
+```bash
+# [server] one reviewer account per person; each password is printed once
+docker compose run --rm melrater python -m django create_rater alice
+# ...and one account for the laptop to push as
+docker compose run --rm melrater python -m django create_rater laptop --ingest
+```
+
+`--ingest` puts the account in the `ingest` group, which is the whole grant.
+It is otherwise an ordinary reviewer account — not staff, not a superuser — so
+a leaked push password buys run ingest and the reviewing UI, and neither the
+admin nor the ability to rewrite anyone's ratings. Revoke it by taking the
+account out of the group; rotate it with `create_rater laptop --ingest
+--reset`.
+
+Then push everything from the laptop. `push_runs` prompts for the password, so
+it need not be written down anywhere:
 
 ```bash
 # [laptop]
-cd ~/git/neuro/melrater      # db/ and media/ are relative paths, and both are gitignored
-rm -f /tmp/melrater-xfer.sqlite3
-sqlite3 db/db.sqlite3 "VACUUM INTO '/tmp/melrater-xfer.sqlite3'"
-
-rsync -avze ssh /tmp/melrater-xfer.sqlite3 hetzner:/tmp/db.sqlite3
-rsync -avze ssh --delete media/ hetzner:/tmp/media/
+cd ~/git/neuro/melrater
+pixi run manage push_runs --server https://2.29.21.207 --user laptop
 ```
 
-At a few hundred runs `media/` is ~86,000 files, and rsync pays a round trip per
-file. If that push is slow, stream it as one archive instead — and note this is
-the *only* time you move media this way; §6 handles everything afterwards:
+Each run is one HTTPS request carrying its rows as JSON and its ~288 montages
+as a tar — roughly 20 MB, a few seconds. A few hundred runs is a few gigabytes
+and is throughput-bound, so expect it to take about as long as an `rsync` of
+the same bytes would have. It is safe to interrupt: runs the server already
+holds with the same montages are skipped on the next run, and that comparison
+is exact rather than a guess, because the montage digest is derived from the
+montage bytes.
 
-```bash
-tar -C media -cf - . | ssh hetzner 'mkdir -p /tmp/media && tar -C /tmp/media -xf -'
-```
-
-Installing it on the server has one non-obvious hazard, so the whole sequence
-matters. A `-wal` is found by *path*, not bound to a particular database: if one
-is left beside `db.sqlite3` when you replace that file, SQLite replays the old
-database's pages into the new one. The result is a site that looks perfectly
-healthy — `integrity_check` returns `ok` — while serving the data you thought
-you had just overwritten. So: stop the app, keep anything the old sidecar holds,
-*then* clear the sidecars and move the file into place.
-
-```bash
-# [server]
-cd /srv/melrater
-docker compose stop melrater 2>/dev/null || docker stop melrater 2>/dev/null || true
-
-# a non-empty -wal means the app died uncleanly and the sidecar holds committed
-# server rows; VACUUM INTO folds them back into their OWN database first
-[ -s /srv/melrater/db/db.sqlite3-wal ] && \
-  sqlite3 /srv/melrater/db/db.sqlite3 "VACUUM INTO '/srv/melrater/backups/pre-push-$(date +%F-%H%M).sqlite3'" || true
-
-rm -f /srv/melrater/db/db.sqlite3-wal /srv/melrater/db/db.sqlite3-shm
-mv /tmp/db.sqlite3 /srv/melrater/db/db.sqlite3
-rsync -a --delete /tmp/media/ /srv/melrater/media/ && rm -rf /tmp/media
-
-chown -R 57439:57439 /srv/melrater/db /srv/melrater/media
-chmod 750 /srv/melrater/media      # rsync -a copies the source's 0755 over §1.6's 0750
-
-docker compose start melrater      # migrate re-runs, idempotently, against the file you just moved
-```
-
-The stack is up from §3, so the stop is real. The rescue copy fires only if the
-app did not shut down cleanly — a clean `docker compose stop` checkpoints and
-removes the `-wal`, so on a first deploy it does not fire at all. This is the
-block a later re-sync re-runs unchanged; only the contents differ.
-
-Your local users come with the database — `auth_user` is in that same file — so
-whatever accounts exist on the laptop exist here, and none that do not. If the
-laptop database has no superuser, neither does this one; see "Is there an admin
-account?" below for whether that matters. Reviewer accounts are made
-with `create_rater` (see "Operating it"), on whichever side is authoritative at
-the time; after this push, that is the server. Note that ingest cannot run here:
-it needs the bidslake catalog and the raw NIfTIs, which is what §6 works around.
+Two things deliberately do not happen here. The laptop's `auth_user` table is
+not copied, so the only accounts that exist are the ones made above. And the
+laptop's database is never pushed wholesale, so there is no moment at which
+this overwrites work done on the server.
 
 The montages are subject-derived. That should inform where this box lives and
 who can reach it.
@@ -447,56 +422,70 @@ hand out the URL.
 
 ## 6. Adding runs after reviewers have started
 
-Section 4 pushes the laptop's whole database up, which **overwrites every rating
-made on the server**. That is fine exactly once. After the URL goes out, the
-server holds work the laptop has never seen, and run 301 has to arrive without
-touching it.
-
-It travels as a Django fixture plus a tar of montages. `export_runs` selects the
-runs and, crucially, drops every *human* reviewer and classification, so a
-bundle is structurally incapable of overwriting anyone's ratings — only FIX
-verdicts ride along. Loading it is stock `loaddata`; there is no custom import
-command to go wrong.
+The same command as §4. There is nothing extra to do once reviewers are
+working, because a push cannot reach a rating: `RunPayload` has no way to
+express a human reviewer, and a run the server already holds is only ever
+re-rendered — its components and classifications are not reachable from the
+endpoint at all.
 
 ```bash
-# [laptop] ingest the new runs as usual, then export just those
-pixi run manage import_run study.duckdb
-pixi run manage export_runs 301 302 303 --out ./outgoing
-
-rsync -av ./outgoing/ hetzner:/srv/melrater/incoming/
+# [laptop] ingest and ship in one pass
+pixi run manage import_run study.duckdb --push https://2.29.21.207 --user laptop
 ```
 
-On a box provisioned before this section existed, create the directory first —
-`mkdir -p /srv/melrater/incoming && chmod 750 /srv/melrater/incoming` — and
-redeploy so `compose.yaml` picks up the new mount.
+Or in two, which is what you want when the runs were ingested earlier, or when
+a push was interrupted:
 
-Bundles are chunked (25 runs each by default, `--runs-per-bundle`) because
-`loaddata` reads a whole fixture into memory inside one transaction, and a few
-hundred runs of component timecourses is more than `compose.yaml`'s
-`mem_limit: 1500m`.
+```bash
+pixi run manage push_runs 301 302 303 --server https://2.29.21.207 --user laptop
+```
+
+`--dry-run` reports what would be sent; `--new` sends only runs the server has
+never seen; `--force` re-sends regardless. A run that fails is reported and the
+batch carries on, with a non-zero exit at the end.
+
+**Re-renders travel the same way.** `rerender_montages` still cannot run on
+the server — it needs `Run.path` and the source NIfTIs — so re-render locally
+and push. The new montages are written to a new digest directory, the row is
+pointed at it, and the old set is deleted, so reviewers pick the change up on
+their next page load. There is no cache to invalidate and no revision to
+remember to carry across.
+
+If a push dies mid-request it leaves montages under a uuid no row names.
+Nothing can see them; reclaim the space when convenient:
 
 ```bash
 # [server]
-cd /srv/melrater
-for f in incoming/*-media.tar; do tar -xf "$f" -C media/; done
-chown -R 57439:57439 media
-
-for f in incoming/runs-*.json; do
-  docker compose run --rm melrater python -m django loaddata "/incoming/$(basename "$f")"
-done
-
-rm -f incoming/runs-*            # only after the runs show up in the UI
+docker compose run --rm melrater python -m django prune_orphan_montages --dry-run
 ```
 
-Every model carries a natural key, so `loaddata` matches on `Run.uuid` rather
-than on a primary key: an interrupted load can simply be re-run, and a bundle
-that is already present updates in place instead of duplicating. Montages are
-stored under `runs/<uuid>/`, which is why the tar drops straight into `media/`
-with no renaming — a loaded run gets a new integer id, and nothing depends on it.
+### When the API is unreachable
 
-This also replaces §4's file-by-file `rsync` of `media/` for anything after the
-first push: a few hundred runs is ~86,000 files, and a handful of tars moves
-them in a fraction of the time.
+The endpoint needs the box up and its certificate valid, and Let's Encrypt
+issues this IP a short-lived one (§1.1), so a box left offline for a week comes
+back with an expired certificate for a couple of minutes. `push_runs` verifies
+TLS and offers no way not to — reaching for `--insecure` at exactly the moment
+the connection is genuinely unprotected is how the push password leaks. Wait
+for renewal.
+
+If you need to move runs while the API is down, Django's own machinery still
+works, because every model carries a natural key:
+
+```bash
+# [laptop]
+pixi run manage dumpdata core.run core.component core.reviewer core.classification \
+  --natural-primary --natural-foreign -o runs.json
+tar -C media -cf montages.tar runs/
+rsync -av runs.json montages.tar hetzner:/tmp/
+
+# [server] -- read runs.json first: unlike a push, this CAN carry a human
+# reviewer, and loading one would overwrite that person's ratings
+tar -C /srv/melrater/media -xf /tmp/montages.tar && chown -R 57439:57439 /srv/melrater/media
+docker compose run --rm -v /tmp:/incoming:ro melrater python -m django loaddata /incoming/runs.json
+```
+
+That last caveat is the reason the API is the normal path: it has no way to
+carry a human rating, and this does.
 
 ## Operating it
 
@@ -522,6 +511,25 @@ so re-issuing means `create_rater alice --reset`.
 Reviewers are deliberately not superusers, so **do not** use `createsuperuser`
 for them: a Django admin can read, rewrite and delete everyone else's ratings,
 and delete the accounts that made them.
+
+### The ingest account
+
+```bash
+docker compose run --rm melrater python -m django create_rater laptop --ingest
+```
+
+The same kind of account, additionally in the `ingest` group, which is what
+`/api/v1/` checks. Rotate it with `create_rater laptop --ingest --reset`.
+Revoke it without touching anything else:
+
+```bash
+docker compose run --rm melrater python -m django shell -c \
+  "from django.contrib.auth.models import User; User.objects.get(username='laptop').groups.clear()"
+```
+
+Bad push passwords go through django-axes like any other login, so five of
+them lock that (address, username) pair for fifteen minutes — which is worth
+knowing before you conclude a push is hanging.
 
 ### Is there an admin account?
 
@@ -551,7 +559,9 @@ docker compose run --rm melrater python -m django shell -c \
 ### Login throttling
 
 Five failed attempts on the same (address, username) pair lock that pair out for
-fifteen minutes; a success resets the counter. Locking the *pair* rather than
+fifteen minutes; a success resets the counter. This covers `/api/v1/` too — the
+ingest endpoint authenticates through `django.contrib.auth`, so a bad push
+password is throttled exactly like a bad password on the login form. Locking the *pair* rather than
 either half is deliberate — everyone arrives through one Caddy container, so an
 address-only lockout would freeze the whole team, and a username-only lockout
 would let anyone freeze one reviewer at will. Failures and lockouts are logged
@@ -619,8 +629,8 @@ ssh -N -L 8000:127.0.0.1:8000 hetzner    # [laptop] then http://127.0.0.1:8000/
 
 Tear it down before starting the real stack. Compose names its container
 `melrater-melrater-1`, so this one is not replaced — both would run, and this one
-keeps port 8000 and the real `db.sqlite3` open for writing, which is the
-two-writers case §4 spends a page avoiding. `--restart unless-stopped` is
+keeps port 8000 and the real `db.sqlite3` open for writing, and SQLite has one
+writer. `--restart unless-stopped` is
 deliberately absent above so it cannot survive §5's reboot:
 
 ```bash
@@ -639,26 +649,38 @@ in its path: only `compose.yaml` and the `Caddyfile` are overwritten.
 
 ## Sharp edges
 
-- **Direction of travel.** §4 pushes the laptop's database up, which overwrites
-  ratings made on the server. Do that exactly once, before the URL goes out.
-  From then on the server is the authoritative copy: new runs go up through §6,
-  which cannot carry a human rating, and everything else flows server→laptop.
-  There is still no merge path for *ratings* — only for runs.
+- **Direction of travel.** The server's database is the authoritative copy of
+  every rating, from the first day. Nothing pushes the laptop's database up:
+  runs arrive over the API, which has no way to express a human reviewer and
+  no way to reach an existing run's components. There is still no merge path
+  for *ratings* — only for runs.
+- **The ingest account is a write credential** for both the montage store and
+  the run table, and it is also a valid web login. django-axes *does* throttle
+  it — the endpoint authenticates through `django.contrib.auth`, so five bad
+  passwords lock that (address, username) pair for fifteen minutes, which will
+  look like a hung push if a script has the password wrong. What it is not is a
+  way into `/admin/` or into anybody's ratings: the account is neither staff
+  nor a superuser.
+- **`push_runs` verifies TLS and offers no way not to.** A box left offline
+  past its six-day certificate presents an expired one, and that is exactly
+  the moment `--insecure` would hand the password to whoever answered. Wait
+  for renewal (§1.1); it is minutes once Caddy can reach Let's Encrypt.
+- **A push that dies leaves montages under a uuid no row names.** Invisible,
+  not broken — that ordering is deliberate, and it is why a half-finished push
+  never shows a reviewer a screen of missing images. `prune_orphan_montages`
+  reclaims the space; nothing does so automatically.
 - **Never `scp` the SQLite file directly**, and never delete a `db.sqlite3-wal`
   that belongs to the `db.sqlite3` still sitting beside it — a non-empty one
-  holds committed rows; `VACUUM INTO` folds them in. But the sidecars left over
-  when you *replace* that database must always be deleted, which is why §4 does:
-  a `-wal` has no tie to a particular file, so SQLite replays the old database's
-  pages into the new one, and `integrity_check` still says `ok`.
-- **Never `rsync --delete` into `/srv/melrater`.** `db/`, `media/`, `backups/`,
-  `incoming/` and `caddy/data` share that directory with the two managed files.
-  Sync the two files by name, as `deploy.sh` does. (`rsync` *into*
-  `/srv/melrater/incoming/` is fine — that is what §6 does.)
+  holds committed rows; `VACUUM INTO` folds them in. If you ever do replace
+  that database, the sidecars left beside it must be deleted first: a `-wal`
+  has no tie to a particular file, so SQLite replays the old database's pages
+  into the new one, and `integrity_check` still says `ok`.
+- **Never `rsync --delete` into `/srv/melrater`.** `db/`, `media/`, `backups/`
+  and `caddy/data` share that directory with the two managed files. Sync the
+  two files by name, as `deploy.sh` does.
 - **Don't add a systemd unit that runs `up -d` on boot** — the obvious move. But
   `restart: unless-stopped` already does that (§5 proves it), and a unit would
-  additionally restart a container you stopped *deliberately* — including
-  mid-way through §4, reopening `db.sqlite3` between the sidecar deletion and
-  the `mv`.
+  additionally restart a container you stopped *deliberately*.
 - **Two substitution syntaxes read the same `.env`.** compose expands
   `${MELRATER_HOST}`; the `Caddyfile` uses `{$MELRATER_HOST}`, expanded by
   Caddy's own adapter from the caddy container's environment — different
@@ -673,10 +695,10 @@ in its path: only `compose.yaml` and the `Caddyfile` are overwritten.
   `MELRATER_ALLOW_EPHEMERAL_STATE=1` overrides it for throwaway tests.
 - **`rerender_montages` cannot run on the server** — it reads `Run.path`, a
   laptop path, and the source NIfTIs are not here. Re-render locally, then ship
-  the result through §6: a re-render bumps `Run.montage_rev`, every montage URL
-  carries it as `?v=`, and the media view answers with a one-year immutable
-  cache header — so a re-render that reaches the server without its new
-  `montage_rev` leaves reviewers looking at cached old images.
+  the result through §6. The stale-cache hazard this bullet used to describe is
+  gone: montage URLs contain the digest of the bytes they serve, so a
+  re-render mints new URLs rather than changing what old ones mean, and there
+  is no revision for the two machines to disagree about.
 - **`python -m django dbshell` fails in the container**: the environment locks
   `libsqlite`, not the `sqlite3` CLI. Use `python -m django shell`, or the
   host's `sqlite3` against the bind mount.
@@ -692,7 +714,7 @@ in its path: only `compose.yaml` and the `Caddyfile` are overwritten.
   `create_rater` and rotated with `create_rater --reset`. If a reviewer needs a
   new one, that is your job, not a page they can find.
 - **`create_rater` prints the password once.** There is no way to recover it —
-  only to issue a new one.
+  only to issue a new one. That applies to the `--ingest` account too.
 - **`default_sni` is mandatory for IP hosting.** Omit it and Caddy logs
   `certificate obtained successfully` while every browser fails the handshake —
   the log looks healthy, so this reads as a browser or firewall problem when it

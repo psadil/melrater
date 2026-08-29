@@ -230,23 +230,42 @@ STATIC_URL = "/static/"
 STATICFILES_DIRS = [SRC_DIR / "static"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# Montages are ordinary Django media: written through `default_storage` (see
+# melrater/core/storage.py for their layout) and served from MEDIA_ROOT by the
+# login-required view in config/urls.py. No STORAGES dict — Django's own
+# defaults are exactly FileSystemStorage + StaticFilesStorage, and a named
+# alias for montages alone bought a seam only half of the code went through.
+#
+# Deliberately left relative and unpinned: `settings.MEDIA_URL` is a property
+# that prepends the script prefix, and a storage backend configured with an
+# explicit base_url would capture the bare "media/" literal instead — the
+# difference between /media/runs/... and a relative URL that resolves under
+# /runs/<id>/ic/<n>/ and 404s.
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-# Montages go through a *named* storage rather than open(MEDIA_ROOT / ...) so
-# that the whole 6 GB of them can later move to object storage by editing this
-# dict — no model change and no migration. Named rather than "default" so the
-# swap targets montages and nothing else. See services.montage_storage.
-STORAGES = {
-    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    # No OPTIONS: location and base_url then fall back to MEDIA_ROOT/MEDIA_URL
-    # *lazily*. Pinning base_url here would capture the bare "media/" literal
-    # above, while `settings.MEDIA_URL` is a property that prepends the script
-    # prefix — the difference between /media/runs/... and a relative URL that
-    # resolves under /runs/<id>/ic/<n>/ and 404s.
-    "montages": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
-}
+# ---------------------------------------------------------------------------
+# Run ingest API (melrater/core/api.py).
+# ---------------------------------------------------------------------------
+# Follows DEBUG, and for the same reason it exists: a source checkout gets the
+# endpoint for free, while `docker run` of this image with no configuration
+# does not expose a write API onto the montage store. compose.yaml opts in.
+INGEST_ENABLED = env.bool("MELRATER_INGEST_ENABLED", default=DEBUG)
+
+# The API's own ceilings, sized against the deployed box (2 vCPU / 4 GB, the
+# container capped at 1500m) and a real run: 96 components -> 288 montages,
+# ~20 MB of tar and ~2.5 MB of JSON. Note that none of these raises a *Django*
+# limit. A pushed run arrives as two multipart FILE parts, and
+# DATA_UPLOAD_MAX_MEMORY_SIZE is calculated excluding file upload data, so its
+# 2.5 MB default keeps guarding /accounts/login/ and the rating POST untouched
+# while a 2.5 MB run payload sails past it.
+INGEST_MAX_TAR_BYTES = env.int(
+    "MELRATER_INGEST_MAX_TAR_BYTES", default=64 * 1024 * 1024
+)
+INGEST_MAX_MONTAGE_BYTES = env.int(
+    "MELRATER_INGEST_MAX_MONTAGE_BYTES", default=1024 * 1024
+)
+INGEST_MAX_COMPONENTS = env.int("MELRATER_INGEST_MAX_COMPONENTS", default=256)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -274,6 +293,13 @@ LOGGING = {
         },
         # failed logins and lockouts, which nothing else records
         "axes": {"handlers": ["stderr"], "level": "WARNING", "propagate": False},
+        # every accepted push, so that runs arriving is a thing the logs show
+        # rather than a thing you infer from the run list having grown
+        "melrater.ingest": {
+            "handlers": ["stderr"],
+            "level": "INFO",
+            "propagate": False,
+        },
     },
 }
 

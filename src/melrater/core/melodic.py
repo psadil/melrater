@@ -33,6 +33,16 @@ class FixVerdict:
     p_signal: float
 
 
+def fix_reviewer_name(model: str, threshold: int | None) -> str:
+    """The Reviewer.name a pyFIX model+threshold is stored under.
+
+    A function rather than only a property because the ingest API rebuilds the
+    name from a pushed model+threshold, and the two spellings have to be the
+    same one.
+    """
+    return f"{model} @ thr{threshold}"
+
+
 @dataclass(frozen=True)
 class FixResult:
     model: str
@@ -41,7 +51,7 @@ class FixResult:
 
     @property
     def reviewer_name(self) -> str:
-        return f"{self.model} @ thr{self.threshold}"
+        return fix_reviewer_name(self.model, self.threshold)
 
 
 @dataclass(frozen=True)

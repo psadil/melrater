@@ -24,5 +24,18 @@
 # sends IP-addressed requests to an endpoint holding no certificate for them.
 https://{$MELRATER_HOST} {
 	encode zstd gzip
+
+	# Caddy imposes no body limit of its own, so without this the ingest
+	# credential is the only thing between the internet and a full disk — and
+	# deploy.md's sharp edges note that a full disk surfaces here as SQLite
+	# write failures rather than as a disk error. One run is ~20 MB of
+	# montages plus ~2.5 MB of JSON; the app refuses anything over
+	# MELRATER_INGEST_MAX_TAR_BYTES (64 MB) itself, and this stops an
+	# oversized body before it is ever read.
+	@api path /api/*
+	request_body @api {
+		max_size 80MB
+	}
+
 	reverse_proxy melrater:8000
 }

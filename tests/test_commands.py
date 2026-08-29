@@ -1,8 +1,6 @@
-"""Management commands: account issuing, batch import, and run transfer."""
+"""Management commands: account issuing, batch import, and montage upkeep."""
 
 import dataclasses
-import json
-import tarfile
 from pathlib import Path
 
 import pytest
@@ -10,9 +8,10 @@ from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.management.base import CommandError
 
-from melrater.core import lake, services
-from melrater.core.models import Classification, Component, Reviewer, Run
-from tests.conftest import N_COMPONENTS, run_inputs
+from melrater.core import lake
+from melrater.core.api import INGEST_GROUP
+from melrater.core.models import Run
+from tests.conftest import montage_dir, run_inputs
 
 pytestmark = pytest.mark.django_db
 
@@ -127,111 +126,68 @@ def test_import_run_dry_run_writes_nothing(
     assert Run.objects.count() == 0
 
 
-# --- export_runs / loaddata --------------------------------------------
+# --- ingest accounts ----------------------------------------------------
 
 
-@pytest.fixture
-def bundle(tmp_path: Path, ingested_run: Run, user) -> Path:
-    """A one-run export, made after a human rating exists locally."""
-    component = ingested_run.components.get(index=1)
-    services.rate_component(user=user, component=component, label="Signal")
-    out = tmp_path / "outgoing"
-    call_command("export_runs", "--out", str(out))
-    return out
+def test_create_rater_ingest_grants_push_rights(capsys) -> None:
+    # Act
+    call_command("create_rater", "laptop", "--ingest")
 
-
-def test_export_writes_a_fixture_and_a_media_tar(bundle: Path) -> None:
     # Assert
-    assert {p.name for p in bundle.iterdir()} == {
-        "runs-001.json",
-        "runs-001-media.tar",
-    }
+    assert User.objects.get(username="laptop").groups.filter(name=INGEST_GROUP).exists()
 
 
-def _fixture_rows(bundle: Path) -> list[dict]:
-    return json.loads((bundle / "runs-001.json").read_text())
+def test_create_rater_without_ingest_grants_nothing(capsys) -> None:
+    # Act: a reviewer must not be able to push runs
+    call_command("create_rater", "alice")
 
-
-def test_export_carries_the_run_itself(bundle: Path) -> None:
     # Assert
-    assert any(row["model"] == "core.run" for row in _fixture_rows(bundle))
+    assert not User.objects.get(username="alice").groups.exists()
 
 
-def test_export_omits_human_reviewers(bundle: Path) -> None:
-    # Assert: the property the whole transfer design rests on — a fixture can
-    # carry no human reviewer, so loading one cannot overwrite server work
-    kinds = {
-        row["fields"]["kind"]
-        for row in _fixture_rows(bundle)
-        if row["model"] == "core.reviewer"
-    }
-    assert kinds == {"fix"}
+def test_create_rater_ingest_stays_non_privileged(capsys) -> None:
+    # Act
+    call_command("create_rater", "laptop", "--ingest")
+
+    # Assert: the group is the whole grant — no admin, no model permissions
+    laptop = User.objects.get(username="laptop")
+    assert not (laptop.is_staff or laptop.is_superuser)
 
 
-def test_export_omits_human_classifications(bundle: Path) -> None:
-    # Arrange: the `bundle` fixture rates a component before exporting
-    reviewers = {
-        row["fields"]["name"]: row["fields"]["kind"]
-        for row in _fixture_rows(bundle)
-        if row["model"] == "core.reviewer"
-    }
-
-    # Assert: every classification names a reviewer the fixture calls FIX
-    assert all(
-        reviewers.get(row["fields"]["reviewer"][0]) == "fix"
-        for row in _fixture_rows(bundle)
-        if row["model"] == "core.classification"
-    )
+# --- prune_orphan_montages ----------------------------------------------
 
 
-def test_export_media_tar_is_keyed_by_uuid(bundle: Path, ingested_run: Run) -> None:
-    # Assert: extracting under media/ puts the files where montage_urls looks
-    with tarfile.open(bundle / "runs-001-media.tar") as tar:
-        names = tar.getnames()
-    assert all(name.startswith(f"runs/{ingested_run.uuid}/") for name in names)
-
-
-def test_loaddata_restores_a_deleted_run(bundle: Path, ingested_run: Run) -> None:
-    # Arrange: the rows are gone; the fixture is the only copy
+def test_prune_removes_montages_no_run_names(
+    ingested_run: Run, media_root: Path
+) -> None:
+    # Arrange: what a push that died before its rows leaves behind
     uuid = ingested_run.uuid
     Run.objects.all().delete()
 
     # Act
-    call_command("loaddata", str(bundle / "runs-001.json"))
+    call_command("prune_orphan_montages")
 
     # Assert
-    assert Component.objects.filter(run__uuid=uuid).count() == N_COMPONENTS
+    assert not (media_root / "runs" / str(uuid)).exists()
 
 
-def test_loaddata_does_not_duplicate_an_existing_run(bundle: Path) -> None:
-    # Act: natural keys mean a second load updates in place
-    call_command("loaddata", str(bundle / "runs-001.json"))
-
-    # Assert
-    assert Run.objects.count() == 1
-
-
-def test_loaddata_leaves_human_ratings_untouched(bundle: Path, user) -> None:
-    # Arrange: this is the server's side of the transfer — a rating made here
-    # must survive a bundle arriving from the laptop
-    before = Classification.objects.get(reviewer__user=user)
-
+def test_prune_keeps_a_run_that_is_still_named(
+    ingested_run: Run, media_root: Path
+) -> None:
     # Act
-    call_command("loaddata", str(bundle / "runs-001.json"))
+    call_command("prune_orphan_montages")
 
     # Assert
-    assert Classification.objects.filter(pk=before.pk, label=before.label).exists()
+    assert montage_dir(media_root, ingested_run).is_dir()
 
 
-def test_loaddata_restores_fix_verdicts(bundle: Path, ingested_run: Run) -> None:
+def test_prune_dry_run_deletes_nothing(ingested_run: Run, media_root: Path) -> None:
     # Arrange
-    Classification.objects.filter(reviewer__kind=Reviewer.Kind.FIX).delete()
+    uuid = ingested_run.uuid
+    Run.objects.all().delete()
 
     # Act
-    call_command("loaddata", str(bundle / "runs-001.json"))
+    call_command("prune_orphan_montages", "--dry-run")
 
     # Assert
-    assert (
-        Classification.objects.filter(reviewer__kind=Reviewer.Kind.FIX).count()
-        == N_COMPONENTS
-    )
+    assert (media_root / "runs" / str(uuid)).exists()

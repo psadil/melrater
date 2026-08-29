@@ -32,7 +32,12 @@ class Run(models.Model):
     # deliberately not `path`, which is a laptop-local absolute path that
     # `import_run --base-dir` exists to rewrite.
     uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
-    path = models.CharField(max_length=500, unique=True)
+    # Not unique: it means nothing on a server that ingests over the API, and
+    # a uniqueness violation there would turn a re-pushed run whose source
+    # directory moved into a 500. `ingest_run` and `selectors.run_ingested`
+    # both check it explicitly with .filter(...).exists(), which is the guard
+    # that actually matters and the only place it is read.
+    path = models.CharField(max_length=500)
     label = models.CharField(max_length=200)
     # BIDS entities, named as the catalog names them so that querying this
     # database by hand reads the same as querying the catalog.
@@ -50,10 +55,14 @@ class Run(models.Model):
     montage_format = models.CharField(
         max_length=8, default="avif", help_text="File extension of rendered montages"
     )
-    # Bumped by rerender_montages. Montage URLs carry it as ?v=, which is what
-    # makes them safe to cache immutably: the bytes at a URL never change,
-    # because a re-render produces a new URL.
-    montage_rev = models.PositiveIntegerField(default=0)
+    # The montage set's content fingerprint (montage.digest_montages, kept to
+    # montage.DIGEST_LENGTH hex characters) and the directory the files live
+    # under: runs/<uuid>/<montage_digest>/. Being derived from the bytes it is
+    # what makes montage URLs immutably cacheable without a revision counter —
+    # a re-render writes a *different* directory, so no URL ever changes
+    # meaning — and it is the same value in every database that holds the run,
+    # which is what lets a push decide "already present" exactly.
+    montage_digest = models.CharField(max_length=16, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     objects: ClassVar[RunManager] = RunManager()

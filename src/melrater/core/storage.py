@@ -1,45 +1,56 @@
-"""The montage object store.
+"""Where one run's montages live under ``MEDIA_ROOT``.
 
-Montages are the only files melrater writes at runtime, and they dominate its
-footprint (~20 MB per run, ~6 GB for a few hundred). Every read and write of
-them goes through this module rather than through ``MEDIA_ROOT`` directly, so
-that moving them to object storage later is an edit to ``settings.STORAGES``
-and nothing else — no model change, no migration.
+Montages are ordinary Django media: written through ``default_storage`` and
+served by ``views.media_file`` out of ``settings.MEDIA_ROOT``. This module owns
+nothing but their *layout*, so that the naming rule lives in one place instead
+of being spelled out at every call site.
 
-Files are keyed by ``Run.uuid``, not by ``Run.pk``: a run loaded into another
-database gets a fresh primary key, and montage paths have to survive that (see
-``export_runs`` and deploy.md).
+The layout is content-addressed::
 
-Deliberately thin, and deliberately separate from ``montage.py``: that module
-stays Django-free so spawn-based render workers can re-import it cheaply, and
-it writes into a plain temporary directory that this module then ingests.
+    runs/<Run.uuid>/<Run.montage_digest>/ic007_axial.avif
+
+``uuid`` rather than a primary key because a run loaded into another database
+gets a fresh id and its images have to survive that. ``digest`` — a fingerprint
+of the rendered bytes, see ``montage.digest_montages`` — because it makes a
+re-render additive: the new set is written alongside the old one and the old
+one is dropped only once the row points at the new directory. Nothing is ever
+overwritten in place, so a montage URL never changes what it means and can be
+served ``immutable``.
+
+Deliberately separate from ``montage.py``: that module stays Django-free so
+spawn-based render workers can re-import it cheaply, and it writes into a plain
+temporary directory that this module then ingests.
 """
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 from uuid import UUID
 
 from django.core.files.base import ContentFile
-from django.core.files.storage import Storage, storages
-
-STORAGE_ALIAS = "montages"
+from django.core.files.storage import Storage, default_storage
 
 
 def montage_storage() -> Storage:
-    return storages[STORAGE_ALIAS]
+    return default_storage
 
 
-def run_prefix(run_uuid: UUID | str) -> str:
-    """Storage-relative directory holding one run's montages."""
+def run_root(run_uuid: UUID | str) -> str:
+    """Storage-relative directory holding every digest of one run."""
     return f"runs/{run_uuid}/"
+
+
+def run_prefix(run_uuid: UUID | str, digest: str) -> str:
+    """Storage-relative directory holding one rendered set of montages."""
+    return f"{run_root(run_uuid)}{digest}/"
 
 
 def save(name: str, data: bytes) -> None:
     """Write ``data`` at ``name``, replacing anything already there.
 
     ``Storage.save`` on its own would *rename* around a collision
-    (``ic001_axial_a8Fk2p.avif``), which would leave a re-rendered run serving
+    (``ic001_axial_a8Fk2p.avif``), which would leave a re-pushed run serving
     its old images forever.
     """
     storage = montage_storage()
@@ -52,36 +63,79 @@ def url(name: str) -> str:
     return montage_storage().url(name)
 
 
-def names_for_run(run_uuid: UUID | str) -> list[str]:
-    """Every stored montage name for one run ([] when the run has none)."""
-    storage = montage_storage()
-    prefix = run_prefix(run_uuid)
-    try:
-        _, files = storage.listdir(prefix)
-    except (FileNotFoundError, NotADirectoryError):
-        return []
-    return [prefix + name for name in files]
+def stored_run_uuids() -> list[str]:
+    """Every run directory in the store, named or not ([] before any exist)."""
+    return _listdir("runs/")[0]
 
 
-def store_directory(run_uuid: UUID | str, staged: Path) -> None:
-    """Ingest a freshly rendered directory into the store under ``run_uuid``."""
-    prefix = run_prefix(run_uuid)
+def digests_for_run(run_uuid: UUID | str) -> list[str]:
+    """Every stored digest directory for one run ([] when there are none)."""
+    return _listdir(run_root(run_uuid))[0]
+
+
+def names_for_run(run_uuid: UUID | str, digest: str) -> list[str]:
+    """Every stored montage name in one digest ([] when there are none)."""
+    prefix = run_prefix(run_uuid, digest)
+    return [prefix + name for name in _listdir(prefix)[1]]
+
+
+def store_directory(run_uuid: UUID | str, digest: str, staged: Path) -> None:
+    """Ingest a freshly rendered directory as one run's ``digest`` set."""
+    prefix = run_prefix(run_uuid, digest)
     for rendered in sorted(staged.iterdir()):
         if rendered.is_file():
             save(prefix + rendered.name, rendered.read_bytes())
 
 
+def delete_digest(run_uuid: UUID | str, digest: str) -> None:
+    """Remove one rendered set. Safe when it is not there."""
+    storage = montage_storage()
+    for name in names_for_run(run_uuid, digest):
+        storage.delete(name)
+    _remove_empty_directory(run_prefix(run_uuid, digest))
+    # and the run's own directory, if that was its last set — rmdir simply
+    # fails, harmlessly, while other digests are still there
+    _remove_empty_directory(run_root(run_uuid))
+
+
+def retain_digest(run_uuid: UUID | str, keep: str) -> None:
+    """Drop every rendered set of one run except ``keep``.
+
+    Called after the row has been pointed at ``keep``, never before: until
+    then the old set is what reviewers are still being served.
+    """
+    for digest in digests_for_run(run_uuid):
+        if digest != keep:
+            delete_digest(run_uuid, digest)
+
+
 def delete_run(run_uuid: UUID | str) -> None:
     """Remove every montage belonging to one run. Safe when there are none."""
-    storage = montage_storage()
-    for name in names_for_run(run_uuid):
-        storage.delete(name)
+    for digest in digests_for_run(run_uuid):
+        delete_digest(run_uuid, digest)
+    _remove_empty_directory(run_root(run_uuid))
 
 
-def delete_extension(run_uuid: UUID | str, extension: str) -> None:
-    """Remove a run's montages in one format, after a re-render changed it."""
+def _remove_empty_directory(prefix: str) -> None:
+    """Drop the directory the deleted files were in, on a filesystem backend.
+
+    ``Storage`` has no notion of one, because an object store has no
+    directories — so this is best-effort and does nothing at all elsewhere.
+    Left behind, an empty directory would keep showing up in
+    ``digests_for_run`` and read as a montage set that is merely missing its
+    files.
+    """
     storage = montage_storage()
-    suffix = f".{extension}"
-    for name in names_for_run(run_uuid):
-        if name.endswith(suffix):
-            storage.delete(name)
+    try:
+        path = Path(storage.path(prefix))
+    except NotImplementedError:
+        return
+    with suppress(OSError):
+        path.rmdir()
+
+
+def _listdir(prefix: str) -> tuple[list[str], list[str]]:
+    try:
+        return montage_storage().listdir(prefix)
+    except (FileNotFoundError, NotADirectoryError):
+        return [], []

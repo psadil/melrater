@@ -11,6 +11,12 @@ A few hundred runs is roughly an hour of rendering, so a run that fails is
 reported and the batch carries on — losing forty minutes of work to one
 malformed fix4melview file is not a useful default. `--stop-on-error` restores
 the old behaviour, and the exit status is non-zero whenever anything failed.
+
+`--push` sends each run to a deployment as soon as it is rendered, so the
+normal case is one command rather than two. A failed push is counted
+separately from a failed ingest: a dropped connection an hour in should read
+as "these runs are here but not there yet, run push_runs", not as an ingest
+that went wrong.
 """
 
 import os
@@ -19,11 +25,13 @@ import typing as t
 from dataclasses import dataclass
 from pathlib import Path
 
+import httpx
 import typer
 from django.core.management.base import CommandError
 from django_typer.management import TyperCommand
 
-from melrater.core import lake, melodic, selectors, services
+from melrater.core import lake, melodic, push, selectors, services
+from melrater.core.models import Run
 
 
 @dataclass
@@ -74,6 +82,20 @@ class Command(TyperCommand):
             bool,
             typer.Option(help="Abort on the first failure instead of continuing."),
         ] = False,
+        push_to: t.Annotated[
+            str,
+            typer.Option(
+                "--push",
+                help="Also push each run to this deployment as it is ingested.",
+            ),
+        ] = "",
+        user: t.Annotated[
+            str, typer.Option(help="Account in the `ingest` group to push as.")
+        ] = os.environ.get("MELRATER_PUSH_USER", ""),
+        password_env: t.Annotated[
+            str,
+            typer.Option(help="Name of an environment variable holding the password."),
+        ] = "MELRATER_PUSH_PASSWORD",
     ) -> None:
         """Ingest every MELODIC+pyFIX run a bidslake catalog knows about."""
         lk = lake.open_catalog(catalog, base_dir=base_dir)
@@ -82,8 +104,11 @@ class Command(TyperCommand):
             self.stdout.write(f"no MELODIC runs in {catalog} match the filters")
             return
 
+        target = self._target(push_to, user, password_env) if push_to else None
+
         total = len(discovered)
         failures: list[Failure] = []
+        not_pushed: list[Failure] = []
         n_ingested = 0
         n_skipped = 0
         started = time.monotonic()
@@ -133,14 +158,47 @@ class Command(TyperCommand):
                     f"({elapsed:.1f} s{self._eta(started, position, total)})"
                 )
             )
+            if target is not None:
+                self._push(target, ingested, prefix, not_pushed)
 
         self._report(
             total=total,
             n_ingested=n_ingested,
             n_skipped=n_skipped,
             failures=failures,
+            not_pushed=not_pushed,
             dry_run=dry_run,
         )
+
+    def _target(self, server: str, user: str, password_env: str) -> push.PushTarget:
+        if not user:
+            raise typer.BadParameter("--push needs --user (or MELRATER_PUSH_USER)")
+        password = os.environ.get(password_env) or typer.prompt(
+            f"password for {user}", hide_input=True
+        )
+        return push.PushTarget(base_url=server, username=user, password=password)
+
+    def _push(
+        self,
+        target: push.PushTarget,
+        run: Run,
+        prefix: str,
+        not_pushed: list[Failure],
+    ) -> None:
+        """Ship one freshly ingested run. A network failure is not an ingest failure."""
+        try:
+            payload, tar = selectors.run_bundle(run)
+            with push.open_client(target) as client:
+                push.push_run(client, target, payload=payload, tar=tar)
+        # the run is safely ingested here either way, so a delivery problem
+        # is reported and the batch continues
+        except (push.PushFailed, httpx.HTTPError, OSError) as exc:
+            not_pushed.append(Failure(str(run.label), f"{type(exc).__name__}: {exc}"))
+            self.stderr.write(
+                self.style.WARNING(f"{prefix} ingested but not pushed: {exc}")
+            )
+            return
+        self.stdout.write(self.style.SUCCESS(f"{prefix} pushed {run.label}"))
 
     def _eta(self, started: float, position: int, total: int) -> str:
         remaining = total - position
@@ -156,6 +214,7 @@ class Command(TyperCommand):
         n_ingested: int,
         n_skipped: int,
         failures: list[Failure],
+        not_pushed: list[Failure],
         dry_run: bool,
     ) -> None:
         verb = "would ingest" if dry_run else "ingested"
@@ -164,10 +223,22 @@ class Command(TyperCommand):
             f"{total} run(s): {n_ingested} {verb}, {n_skipped} already present, "
             f"{len(failures)} failed"
         )
-        if not failures:
-            return
         for failure in failures:
             self.stderr.write(self.style.ERROR(f"  {failure.label}: {failure.reason}"))
+        if not_pushed:
+            self.stdout.write("")
+            self.stdout.write(
+                self.style.WARNING(
+                    f"{len(not_pushed)} run(s) ingested but not pushed; "
+                    "`push_runs` will retry them:"
+                )
+            )
+            for failure in not_pushed:
+                self.stderr.write(
+                    self.style.WARNING(f"  {failure.label}: {failure.reason}")
+                )
+        if not failures:
+            return
         # non-zero exit, so this cannot pass unnoticed in a script
         raise CommandError(f"{len(failures)} of {total} run(s) could not be ingested")
 

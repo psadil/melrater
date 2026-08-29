@@ -203,11 +203,11 @@ def test_deleting_a_rater_is_refused_while_they_have_ratings(
         user.delete()
 
 
-def test_montages_follow_the_configured_storage(
+def test_montages_land_under_the_configured_media_root(
     ingested_run: Run, media_root: Path
 ) -> None:
-    # Assert: nothing writes through MEDIA_ROOT directly, so redirecting the
-    # storage relocates the montages and the repository stays clean
+    # Assert: montages are ordinary Django media, so pointing MEDIA_ROOT at a
+    # temporary directory relocates them and the repository stays clean
     assert montage_dir(media_root, ingested_run).is_dir()
 
 
@@ -219,14 +219,25 @@ def test_montage_urls_are_keyed_by_uuid(ingested_run: Run) -> None:
     assert f"/media/runs/{ingested_run.uuid}/" in urls["axial"]
 
 
-def test_montage_urls_carry_the_render_revision(ingested_run: Run) -> None:
-    # Arrange
-    services.rerender_montages(run=ingested_run, image_workers=1)
-    ingested_run.refresh_from_db()
-
+def test_montage_urls_carry_the_content_digest(ingested_run: Run) -> None:
     # Act
     urls = selectors.montage_urls(ingested_run.components.get(index=1))
 
-    # Assert: a new revision means new URLs, which is what makes the immutable
-    # cache header on /media/ honest
-    assert urls["axial"].endswith("?v=1")
+    # Assert: the digest is in the path, which is what makes the immutable
+    # cache header on /media/ honest — different bytes are a different URL
+    assert f"/{ingested_run.montage_digest}/" in urls["axial"]
+
+
+def test_rerender_leaves_no_superseded_montages(
+    ingested_run: Run, media_root: Path, monkeypatch
+) -> None:
+    # Arrange: a format change is the cheapest way to force different bytes
+    monkeypatch.setattr(montage, "AVIF_OK", False)
+
+    # Act
+    services.rerender_montages(run=ingested_run, image_workers=1)
+    ingested_run.refresh_from_db()
+
+    # Assert: the old set is dropped once the row points at the new one
+    digests = [p.name for p in (media_root / "runs" / str(ingested_run.uuid)).iterdir()]
+    assert digests == [str(ingested_run.montage_digest)]

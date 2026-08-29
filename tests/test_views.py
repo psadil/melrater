@@ -188,11 +188,16 @@ def test_set_axis_requires_login(client, ingested_run: Run) -> None:
     assert response.url.startswith("/accounts/login/")
 
 
+def _montage_url(run: Run) -> str:
+    """The first montage's URL, digest and all."""
+    return (
+        f"/media/runs/{run.uuid}/{run.montage_digest}/ic001_axial.{run.montage_format}"
+    )
+
+
 def test_media_redirects_anonymous_to_login(client, ingested_run: Run) -> None:
     # Act
-    response = client.get(
-        f"/media/runs/{ingested_run.uuid}/ic001_axial.{ingested_run.montage_format}"
-    )
+    response = client.get(_montage_url(ingested_run))
 
     # Assert
     assert response.url.startswith("/accounts/login/")
@@ -200,9 +205,7 @@ def test_media_redirects_anonymous_to_login(client, ingested_run: Run) -> None:
 
 def test_media_serves_montage_when_logged_in(logged_in, ingested_run: Run) -> None:
     # Act
-    response = logged_in.get(
-        f"/media/runs/{ingested_run.uuid}/ic001_axial.{ingested_run.montage_format}"
-    )
+    response = logged_in.get(_montage_url(ingested_run))
 
     # Assert: served by the Django view, so this works regardless of DEBUG
     assert response.status_code == 200
@@ -231,11 +234,10 @@ def test_response_carries_a_content_security_policy(
 
 
 def test_montage_response_is_cacheable_forever(logged_in, ingested_run: Run) -> None:
-    # Arrange: the ?v= revision makes the bytes at a URL immutable
-    url = f"/media/runs/{ingested_run.uuid}/ic001_axial.{ingested_run.montage_format}"
+    # Arrange: the digest in the path makes the bytes at a URL immutable
 
     # Act
-    response = logged_in.get(url)
+    response = logged_in.get(_montage_url(ingested_run))
 
     # Assert
     assert "immutable" in response.headers["Cache-Control"]

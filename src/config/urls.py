@@ -3,6 +3,7 @@ from django.contrib.auth import views as auth_views
 from django.urls import include, path
 
 from melrater.core import views
+from melrater.core.api import api as ingest_api
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -15,6 +16,10 @@ urlpatterns = [
     path("accounts/login/", auth_views.LoginView.as_view(), name="login"),
     path("accounts/logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("", include("melrater.core.urls")),
+    # Run ingest. Authenticated by HTTP Basic against an account in the
+    # `ingest` group and inert unless MELRATER_INGEST_ENABLED is on; nothing
+    # here reads or writes a rating. See melrater/core/api.py.
+    path("api/v1/", ingest_api.urls),
     # montages contain subject-derived images, so media requires login and is
     # served by Django itself (works with DEBUG off; fine at this tool's scale)
     path("media/<path:path>", views.media_file, name="media"),

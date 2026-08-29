@@ -100,18 +100,20 @@ def media_root(tmp_path: Path, settings) -> Path:
     root = tmp_path / "media"
     settings.MEDIA_ROOT = root
     settings.STORAGES = {
-        **settings.STORAGES,
-        "montages": {
+        "default": {
             "BACKEND": "django.core.files.storage.FileSystemStorage",
             "OPTIONS": {"location": str(root), "base_url": settings.MEDIA_URL},
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"
         },
     }
     return root
 
 
 def montage_dir(media_root: Path, run) -> Path:
-    """Where one run's montages land (keyed by uuid, not primary key)."""
-    return media_root / "runs" / str(run.uuid)
+    """Where one run's montages land: keyed by uuid, then by content digest."""
+    return media_root / "runs" / str(run.uuid) / str(run.montage_digest)
 
 
 @pytest.fixture
@@ -150,6 +152,7 @@ def bare_runs(db):
                 fd=[],
                 frequencies=[],
                 metric_stats={"names": [], "dropped": [], "stats": {}},
+                montage_digest=f"{i:016x}",
             )
             Component.objects.bulk_create(
                 Component(
@@ -167,3 +170,32 @@ def bare_runs(db):
         return made
 
     return make
+
+
+@pytest.fixture
+def ingest_user(django_user_model):
+    """An account in the `ingest` group, as `create_rater --ingest` makes one."""
+    from django.contrib.auth.models import Group
+
+    from melrater.core.api import INGEST_GROUP
+
+    user = django_user_model.objects.create_user("pusher", password="pw")
+    user.groups.add(Group.objects.get_or_create(name=INGEST_GROUP)[0])
+    return user
+
+
+@pytest.fixture
+def ingest_auth(ingest_user) -> dict[str, str]:
+    """Headers that authenticate as `ingest_user` over HTTP Basic."""
+    import base64
+
+    token = base64.b64encode(b"pusher:pw").decode()
+    return {"HTTP_AUTHORIZATION": f"Basic {token}"}
+
+
+@pytest.fixture
+def push_bundle(ingested_run, media_root):
+    """One run's two file parts, exactly as `push_runs` would send them."""
+    from melrater.core import selectors
+
+    return selectors.run_bundle(ingested_run)

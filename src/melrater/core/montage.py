@@ -13,7 +13,10 @@ PNG otherwise.
 
 from __future__ import annotations
 
+import hashlib
 import io
+import re
+from collections.abc import Iterable
 from pathlib import Path
 
 import nibabel as nib
@@ -35,6 +38,10 @@ ALPHA_GAMMA = 2.0  # quadratic opacity ramp below Z_THRESH ("Go Figure")
 UPSCALE = 2  # nearest-neighbour upscale of montage voxels
 MIN_SLICE_COVERAGE = 0.05  # mask fraction for a slice to be shown
 N_LIGHTBOX = 25
+#: Hex characters of the montage-set digest kept for the storage path. 64 bits:
+#: a collision would only serve one run's cached montages for another, and the
+#: whole population is a few hundred runs.
+DIGEST_LENGTH = 16
 
 AXES = {"sagittal": 0, "coronal": 1, "axial": 2}
 
@@ -170,6 +177,69 @@ def encode(img: Image.Image) -> tuple[bytes, str]:
 
 def montage_name(index: int, axis_name: str, ext: str) -> str:
     return f"ic{index:03d}_{axis_name}.{ext}"
+
+
+#: The exact inverse of ``montage_name``, and the only thing that turns an
+#: outside string into a stored path. ``\Z`` rather than ``$``: ``$`` also
+#: matches before a trailing newline, so ``"ic001_axial.avif\n"`` would pass
+#: and the rebuilt name would differ from the one that was checked.
+MONTAGE_NAME_RE = re.compile(rf"ic(\d{{3}})_({'|'.join(AXES)})\.(avif|png)\Z")
+
+
+def parse_montage_name(name: str) -> tuple[int, str, str] | None:
+    """``'ic007_axial.avif'`` -> ``(7, 'axial', 'avif')``; None if it is not one.
+
+    Callers rebuild the stored name with ``montage_name(*parsed)`` rather than
+    reusing ``name``, so nothing a client chose ever reaches a storage path.
+    """
+    match = MONTAGE_NAME_RE.fullmatch(name)
+    if match is None:
+        return None
+    index = int(match[1])
+    if index < 1:  # IC numbers are 1-based; ic000 is not a component
+        return None
+    return index, match[2], match[3]
+
+
+def digest_montages(members: Iterable[tuple[str, bytes]]) -> str:
+    """A stable fingerprint of one run's whole montage set.
+
+    This is the run's montage *identity*: it is the directory name the files
+    are stored under (``runs/<uuid>/<digest>/``), so a re-render lands beside
+    the old set rather than on top of it, and a montage URL never has to be
+    invalidated — different bytes are simply a different URL. Being derived
+    from the bytes, it also means two databases agree on it without either
+    having to be told.
+
+    Order-independent, so it does not depend on how a directory happens to
+    enumerate.
+    """
+    return digest_hashed_montages(
+        (name, hashlib.sha256(data).digest()) for name, data in members
+    )
+
+
+def digest_hashed_montages(hashed: Iterable[tuple[str, bytes]]) -> str:
+    """``digest_montages`` for a caller that already hashed each file.
+
+    The receiving end streams one montage at a time and never holds the whole
+    set, so it hashes as it goes and folds the per-file digests in here.
+    """
+    outer = hashlib.sha256()
+    for name, file_digest in sorted(hashed):
+        outer.update(name.encode())
+        outer.update(b"\0")
+        outer.update(file_digest)
+    return outer.hexdigest()[:DIGEST_LENGTH]
+
+
+def digest_directory(staged: Path) -> str:
+    """``digest_montages`` over a freshly rendered directory."""
+    return digest_montages(
+        (entry.name, entry.read_bytes())
+        for entry in staged.iterdir()
+        if entry.is_file()
+    )
 
 
 def render_component_montages(

@@ -31,9 +31,10 @@ RATING_BUTTONS = [
 AXIS_SESSION_KEY = "montage_axis"
 DEFAULT_AXIS = "axial"
 
-# Montage URLs carry ?v=<Run.montage_rev>, so the bytes behind one never change
-# — a re-render mints new URLs. That makes them safely immutable, which matters:
-# a reviewer walking 96 components would otherwise revalidate every image.
+# A montage URL contains the run's montage digest, so the bytes behind one
+# never change — a re-render mints new URLs. That makes them safely immutable,
+# which matters: a reviewer walking 96 components would otherwise revalidate
+# every image.
 MONTAGE_CACHE_CONTROL = "private, max-age=31536000, immutable"
 
 

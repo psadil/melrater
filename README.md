@@ -27,7 +27,10 @@ pixi run manage create_rater <username>   # prints a generated password, once
 
 `create_rater` makes an ordinary reviewer account. Reviewers never choose or
 reset their own password — there is no reset page — so re-issuing is
-`create_rater <username> --reset`.
+`create_rater <username> --reset`. Adding `--ingest` also puts the account in
+the `ingest` group, which is what lets it push runs to a deployment (below);
+it is otherwise an ordinary account, so what a leaked push password buys is
+run ingest and the reviewing UI — not the admin, and not anyone's ratings.
 
 A fresh database has **no superuser**, and none is needed: the app never uses
 the admin, and `pixi run manage shell` does anything it could. Run
@@ -96,16 +99,33 @@ with FIX stand out as a color on the wrong side of the threshold line.
 
 Ingest needs the raw NIfTIs and the catalog, so it happens on the laptop; once
 reviewers are working, the server's database is the authoritative copy of their
-ratings and must not be overwritten. `export_runs` bridges the two — a Django
-fixture plus a tar of montages, loaded on the far side with plain `loaddata`:
+ratings and must not be overwritten. `push_runs` bridges the two over the
+deployment's ingest API — one HTTPS request per run, carrying its rows as JSON
+and its montages as a tar:
 
 ```sh
-pixi run manage export_runs 301 302 --out ./outgoing
+pixi run manage push_runs 301 302 --server https://<host> --user <ingest account>
 ```
 
-The fixture carries no human reviewer or classification, so it cannot overwrite
-anyone's work, and every model has a natural key, so loading is idempotent and
-assigns fresh primary keys. See [deploy.md](deploy.md) §6 for the server side.
+It prompts for the password unless `MELRATER_PUSH_PASSWORD` is set, so the
+credential need not live in a file. Runs the server already holds with the same
+montages are skipped, which makes re-running after an interruption free — the
+comparison is exact, because a run's montage digest is derived from the montage
+bytes and so means the same thing in both databases.
+
+Nothing about a human reviewer can travel: `RunPayload` has no way to express
+one, and a run the server already has is only ever re-rendered — its
+components and classifications are not reachable from the endpoint at all.
+
+Ingesting and pushing can be one step:
+
+```sh
+pixi run manage import_run study.duckdb --push https://<host> --user <ingest account>
+```
+
+A failed push there is reported separately from a failed ingest: the runs are
+still on the laptop, and `push_runs` will pick them up. See
+[deploy.md](deploy.md) §6.
 
 ## Deploy
 

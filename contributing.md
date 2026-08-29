@@ -37,8 +37,11 @@ task's own env, where it wins.
 - **Architecture** follows the
   [HackSoft Django StyleGuide](https://github.com/HackSoftware/Django-Styleguide):
   writes in `services.py`, reads in `selectors.py`, views stay thin.
-  Domain logic (`melodic.py`, `metrics.py`, `montage.py`, `charts.py`) is
-  Django-free and fully typed. `lake.py` is the one module that talks to a
+  `api.py` (the [django-ninja](https://django-ninja.dev) ingest endpoints) is
+  thin in exactly the same way, and `push.py` is its client — Django-free, so
+  its tests need only `httpx.MockTransport`. Domain logic (`melodic.py`,
+  `metrics.py`, `montage.py`, `charts.py`, `transfer.py`) is Django-free and
+  fully typed. `lake.py` is the one module that talks to a
   [bidslake](https://github.com/psadil/bidslake) catalog — it resolves which
   files belong to which run and hands `melodic.py` plain paths/arrays; a role
   that resolves to anything but exactly one file is reported, never guessed.
@@ -74,22 +77,40 @@ task's own env, where it wins.
   something opts in. A source checkout opts in via `MELRATER_DEV=1` in
   pixi.toml's `[activation.env]`; that variable exists precisely so
   `MELRATER_DEBUG` stays overridable from the shell.
-- **Montage files** are reached only through the `montages` entry in
-  `settings.STORAGES`, via `melrater/core/storage.py` — never through
-  `MEDIA_ROOT` directly. Keeping that seam is what would let ~6 GB of images
-  move to object storage as a settings change. They are keyed by `Run.uuid`,
-  not by primary key, so a run stays intact when it is loaded into another
-  database (see below). `montage.py` stays Django-free and renders into a plain
-  temporary directory that `storage.store_directory` then ingests.
-- **Transferring runs between databases** uses Django's own machinery: every
-  model defines `natural_key()` and a manager with `get_by_natural_key()`, and
-  `export_runs` writes fixtures with `use_natural_primary_keys` so the far side
-  is plain `loaddata`. Human reviewers and classifications are excluded from
-  exports by construction, which is what makes a bundle unable to overwrite
-  ratings. Add a natural key to any new model that has to travel.
+- **Montage files** are ordinary Django media under `MEDIA_ROOT`: written
+  through `default_storage`, served by the login-required view in
+  `config/urls.py`. `melrater/core/storage.py` owns nothing but their
+  *layout*, `runs/<Run.uuid>/<Run.montage_digest>/ic007_axial.avif`. The uuid
+  because a run loaded into another database gets a fresh primary key and its
+  images have to survive that; the digest — a fingerprint of the rendered
+  bytes — because it makes a re-render additive rather than destructive, which
+  is what licenses the `immutable` cache header. Never invent a revision
+  counter: two databases agree on a content digest without being told, and a
+  counter each side increments on its own would hand out a URL that had
+  already served different bytes. `montage.py` stays Django-free and renders
+  into a plain temporary directory that `storage.store_directory` ingests.
+- **A montage name is rebuilt, never accepted.** Everything arriving from
+  outside goes through `montage.parse_montage_name` and back out through
+  `montage.montage_name`, from a parsed integer, an `AXES` key, and a format
+  sniffed from the bytes — so no string a client chose reaches a storage path.
+  Keep that pair adjacent in `montage.py` so they cannot drift, and note the
+  `\Z` in the pattern: `$` also matches before a trailing newline.
+- **Transferring runs between databases** is the ingest API: `push_runs` sends
+  one run per request to `/api/v1/runs`, authenticated as an account in the
+  `ingest` group. Montages are stored before the rows that name them, so a
+  push that dies leaves invisible orphans (`prune_orphan_montages`) rather
+  than a run with broken images; a run the server already holds is only ever
+  re-rendered, never rewritten. Human reviewers and classifications have no
+  representation in `RunPayload` at all, which is what makes a push unable to
+  overwrite ratings. Models still carry `natural_key()` and
+  `get_by_natural_key()` so `dumpdata`/`loaddata` remain available; add them
+  to any new model that has to travel.
 - **Serving**: `pixi run serve` runs granian (async, uvloop, ASGI without
   lifespan) and mounts the collected static files itself; montages under
   `/media/` always go through the login-required Django view.
+- **Configuration** additions for the ingest API are `MELRATER_INGEST_*`, and
+  `INGEST_ENABLED` follows `DEBUG` — a source checkout has the endpoint, a
+  bare `docker run` of the image does not, and `compose.yaml` opts in.
 - **SQLite in production**: WAL journal, `IMMEDIATE` transactions
   (see `config/settings.py`); don't add a second database backend. An
   `atomic()` block holds the one write lock for its whole duration, so keep
