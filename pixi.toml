@@ -11,10 +11,20 @@ version = "0.1.0"
 [activation.env]
 PYTHONPATH = "$PIXI_PROJECT_ROOT/src"
 DJANGO_SETTINGS_MODULE = "config.settings"
+# "this is a source checkout": settings.py takes its developer defaults from
+# this, and it can never reach the container, because pixi's activation applies
+# to `pixi run` only and pixi is not on the runtime image (see the Dockerfile's
+# four ENV lines). Deliberately not MELRATER_DEBUG itself — activation.env
+# overrides the inherited environment, so `MELRATER_DEBUG=0 pixi run manage
+# check --deploy` would silently still be checking a debug server.
+MELRATER_DEV = "1"
 
 [tasks]
 manage = "python -m django"
 collectstatic = "python -m django collectstatic --noinput"
+# The production system checks, run against production-shaped settings. The
+# values are throwaways; the point is DEBUG off and a proxy in front.
+check-deploy = { cmd = "python -m django check --deploy", env = { MELRATER_DEBUG = "0", MELRATER_SECRET_KEY = "check-only-throwaway", MELRATER_ALLOWED_HOSTS = "example.invalid", MELRATER_CSRF_TRUSTED_ORIGINS = "https://example.invalid", MELRATER_BEHIND_TLS_PROXY = "1" } }
 # Refresh the typed catalog vocabulary (melrater/core/_lake_models.py) from a
 # feat-adapter catalog, after re-indexing or a bidslake bump:
 #   pixi run regen-lake-models path/to/study.duckdb
@@ -53,6 +63,13 @@ django = ">=6"
 pydantic = ">=2"
 granian = ">=2.6"
 uvloop = ">=0.22"
+# 12-factor config: typed casts and explicit defaults for the MELRATER_* env
+# variables, so "DEBUG is off unless someone says otherwise" is one declaration
+# rather than a string comparison.
+django-environ = ">=0.14"
+# login throttling. The lockout tables are ordinary migrations, so the
+# entrypoint's `migrate` installs them with everything else.
+django-axes = ">=8.3"
 # build toolchain for the bidslake pypi dependency (a PyO3/maturin extension,
 # compiled at install time)
 rust = "*"

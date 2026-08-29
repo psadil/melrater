@@ -104,3 +104,28 @@ def test_prob_strip_omits_dot_for_unknown_component(
 
     # Assert
     assert f'fill="{charts.C_ACCENT}"' not in svg
+
+
+def test_metric_glyph_emits_only_its_own_markup() -> None:
+    # Arrange: the glyph is rendered with |safe, so its inputs must never be
+    # able to introduce a tag. They are all floats — this pins that.
+    svg = charts.metric_glyph_svg(2.0, -1.0, -0.5, 0.5, 1.0, [0.1, 0.2])
+
+    # Assert
+    assert svg.count("<") == svg.count("<svg") + svg.count("<rect") + svg.count(
+        "<line"
+    ) + svg.count("<circle") + svg.count("</svg")
+
+
+def test_prob_strip_ignores_an_unknown_label(tmp_path) -> None:
+    # Arrange: labels reach this function from FIX files and are used only as
+    # palette keys, never interpolated into the markup
+    entries = [
+        charts.ProbEntry(index=1, p_signal=0.5, fix_label="<script>", user_label=None)
+    ]
+
+    # Act
+    svg = charts.prob_strip_svg(entries, current_ic=1, threshold=0.05)
+
+    # Assert
+    assert "<script>" not in svg

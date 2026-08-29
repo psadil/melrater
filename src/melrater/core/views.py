@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from urllib.parse import urlencode
 
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
-from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
+from django.http import (
+    HttpRequest,
+    HttpResponse,
+    HttpResponseBadRequest,
+    HttpResponseBase,
+)
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_http_methods
+from django.views.static import serve
 
 from melrater.core import charts, selectors, services
 from melrater.core.metrics import OUTLIER_Z, family_of
@@ -23,6 +31,11 @@ RATING_BUTTONS = [
 AXIS_SESSION_KEY = "montage_axis"
 DEFAULT_AXIS = "axial"
 
+# Montage URLs carry ?v=<Run.montage_rev>, so the bytes behind one never change
+# — a re-render mints new URLs. That makes them safely immutable, which matters:
+# a reviewer walking 96 components would otherwise revalidate every image.
+MONTAGE_CACHE_CONTROL = "private, max-age=31536000, immutable"
+
 
 def _authed_user(request: HttpRequest) -> AbstractBaseUser:
     user = request.user
@@ -33,8 +46,45 @@ def _authed_user(request: HttpRequest) -> AbstractBaseUser:
 
 @login_required
 def run_list(request: HttpRequest) -> HttpResponse:
-    rows = selectors.runs_with_progress(_authed_user(request))
-    return render(request, "core/run_list.html", {"rows": rows})
+    query = request.GET.get("q", "").strip()
+    hide_complete = request.GET.get("hide_complete") == "1"
+    result = selectors.run_list_page(
+        _authed_user(request),
+        query=query,
+        hide_complete=hide_complete,
+        page_number=request.GET.get("page"),
+    )
+    # everything except `page`, so the pager keeps the current filter
+    filter_qs = urlencode(
+        {
+            k: v
+            for k, v in (("q", query), ("hide_complete", "1" if hide_complete else ""))
+            if v
+        }
+    )
+    return render(
+        request,
+        "core/run_list.html",
+        {
+            "result": result,
+            "q": query,
+            "hide_complete": hide_complete,
+            "filter_qs": filter_qs,
+        },
+    )
+
+
+@login_required
+def media_file(request: HttpRequest, path: str) -> HttpResponseBase:
+    """Serve one montage. Login-required because these are subject-derived.
+
+    HttpResponseBase, not HttpResponse: `serve` answers with a FileResponse
+    for a hit and an HttpResponseNotModified for a conditional request, and
+    only their common base covers both.
+    """
+    response = serve(request, path, document_root=settings.MEDIA_ROOT)
+    response.headers["Cache-Control"] = MONTAGE_CACHE_CONTROL
+    return response
 
 
 @dataclass(frozen=True)
@@ -113,12 +163,13 @@ def _component_context(run: Run, component: Component, user: AbstractBaseUser) -
         else None
     )
     unrated_after = [i for i in indices if i not in user_labels and i != index]
+    next_index = index + 1 if index < n_total else None
     context = {
         "run": run,
         "component": component,
         "n_total": n_total,
         "prev_index": index - 1 if index > 1 else None,
-        "next_index": index + 1 if index < n_total else None,
+        "next_index": next_index,
         "next_unrated": next((i for i in unrated_after if i > index), None)
         or (unrated_after[0] if unrated_after else None),
         "montages": selectors.montage_urls(component),
@@ -139,13 +190,25 @@ def _component_context(run: Run, component: Component, user: AbstractBaseUser) -
     return context
 
 
+def _active_axis(request: HttpRequest) -> str:
+    axis = request.session.get(AXIS_SESSION_KEY, DEFAULT_AXIS)
+    return axis if axis in AXES else DEFAULT_AXIS
+
+
 @login_required
 def component_detail(request: HttpRequest, run_id: int, index: int) -> HttpResponse:
     run = get_object_or_404(Run, pk=run_id)
     component = get_object_or_404(Component, run=run, index=index)
     context = _component_context(run, component, _authed_user(request))
-    axis = request.session.get(AXIS_SESSION_KEY, DEFAULT_AXIS)
-    context["active_axis"] = axis if axis in AXES else DEFAULT_AXIS
+    axis = _active_axis(request)
+    context["active_axis"] = axis
+    # Warm the next component's montage while this one is being judged. Only
+    # the visible axis: the other two are not fetched for this component
+    # either (the template gives them data-src, not src).
+    next_index = context["next_index"]
+    context["prefetch_url"] = (
+        selectors.montage_url(run, next_index, axis) if next_index else None
+    )
     return render(request, "core/component_detail.html", context)
 
 
@@ -175,4 +238,5 @@ def component_rate(request: HttpRequest, run_id: int, index: int) -> HttpRespons
     except ValueError as exc:
         return HttpResponseBadRequest(str(exc), content_type="text/plain")
     context = _component_context(run, component, user)
+    context["active_axis"] = _active_axis(request)
     return render(request, "core/partials/rate_response.html", context)

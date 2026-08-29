@@ -35,6 +35,7 @@ def assemble(**overrides) -> lake.DiscoveredRun:
     kwargs: dict = {
         "anchor_path": ANCHOR_PATH,
         "anchor_local": ANCHOR_LOCAL,
+        "entities": {"sub": "01", "ses": None, "task": "t", "run": None},
         "roles": resolved_roles(),
         "unresolved": {},
         "classifications": (Path("/data") / RUN_DIR / "fix4melview_A_thr1.txt",),

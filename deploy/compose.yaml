@@ -29,6 +29,10 @@ services:
       # absolute, so they do not depend on where compose is run from
       - /srv/melrater/db:/app/db
       - /srv/melrater/media:/app/media
+      # staging area for `export_runs` bundles arriving from the laptop, read
+      # by `loaddata` (deploy.md §6). Read-only: the container consumes these,
+      # it never writes them, and rsync puts them there from outside.
+      - /srv/melrater/incoming:/incoming:ro
     # Measured steady state is ~400 MB with two granian workers; this is roughly
     # 4x headroom. The point is not to be tight, it is to make the kernel kill
     # this container rather than pick its own victim under memory pressure —

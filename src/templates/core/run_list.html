@@ -3,11 +3,33 @@
 {% block content %}
 <div class="run-list">
   <h1>Runs</h1>
-  {% if not rows %}
-    <p class="muted">No runs ingested yet. Ingest one with:
-      <code>pixi run manage import_run /path/to/derivatives_dir</code></p>
+
+  {% if result.n_runs %}
+    <form class="run-filter" method="get">
+      <input class="filter-q" type="search" name="q" value="{{ q }}"
+             placeholder="filter by subject, session, task or run&#8230;">
+      <label class="filter-toggle">
+        <input type="checkbox" name="hide_complete" value="1" {% if hide_complete %}checked{% endif %}>
+        hide complete
+      </label>
+      <button class="nav-btn" type="submit">filter</button>
+      {% if q or hide_complete %}<a class="nav-btn" href="{% url 'run-list' %}">clear</a>{% endif %}
+      <span class="muted">{{ result.n_matching }} of {{ result.n_runs }}</span>
+      {% if result.resume %}
+        <a class="nav-btn resume" href="{% url 'component-detail' result.resume.run.pk result.resume.next_unrated %}">
+          resume &#8674; {{ result.resume.run.label }} IC {{ result.resume.next_unrated }}</a>
+      {% endif %}
+    </form>
   {% endif %}
-  {% for row in rows %}
+
+  {% if not result.n_runs %}
+    <p class="muted">No runs ingested yet. Ingest one with:
+      <code>pixi run manage import_run study.duckdb</code></p>
+  {% elif not result.rows %}
+    <p class="muted">No runs match that filter.</p>
+  {% endif %}
+
+  {% for row in result.rows %}
     <div class="card run-card">
       <div class="run-card-head">
         <a class="run-label"
@@ -27,5 +49,17 @@
       </div>
     </div>
   {% endfor %}
+
+  {% if result.page.paginator.num_pages > 1 %}
+    <div class="pager">
+      {% if result.page.has_previous %}
+        <a class="nav-btn" href="?page={{ result.page.previous_page_number }}{% if filter_qs %}&{{ filter_qs }}{% endif %}">&#8592; prev</a>
+      {% else %}<span class="nav-btn disabled">&#8592; prev</span>{% endif %}
+      <span class="muted">page {{ result.page.number }} of {{ result.page.paginator.num_pages }}</span>
+      {% if result.page.has_next %}
+        <a class="nav-btn" href="?page={{ result.page.next_page_number }}{% if filter_qs %}&{{ filter_qs }}{% endif %}">next &#8594;</a>
+      {% else %}<span class="nav-btn disabled">next &#8594;</span>{% endif %}
+    </div>
+  {% endif %}
 </div>
 {% endblock %}

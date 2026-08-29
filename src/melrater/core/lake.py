@@ -130,6 +130,7 @@ def discover_runs(
             _assemble(
                 anchor_path=row["file_path"],
                 anchor_local=bidslake.to_local_path(bidslake.sibling_path(lake, row)),
+                entities={k: row[k] for k in ("sub", "ses", "task", "run")},
                 roles=roles,
                 unresolved=bidslake.unresolved(row, _ROLES),
                 classifications=classifications.get(_unit_key(row), ()),
@@ -223,6 +224,7 @@ def _assemble(
     *,
     anchor_path: str,
     anchor_local: Path,
+    entities: Mapping[str, str | None],
     roles: Mapping[str, Path | None],
     unresolved: Mapping[str, int],
     classifications: Sequence[Path],
@@ -259,6 +261,10 @@ def _assemble(
     inputs = melodic.RunInputs(
         root=root,
         label=label,
+        sub=entities["sub"] or "",
+        ses=entities["ses"] or "",
+        task=entities["task"] or "",
+        run=entities["run"] or "",
         bold=resolved["bold"],
         mix=anchor_local,
         ftmix=resolved["ftmix"],

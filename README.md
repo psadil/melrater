@@ -22,8 +22,14 @@ with axial/coronal/sagittal lightbox switching.
 ```sh
 pixi install --all
 pixi run manage migrate
-pixi run manage createsuperuser
+pixi run manage create_rater <username>   # prints a generated password, once
 ```
+
+`create_rater` makes an ordinary reviewer account. Reviewers never choose or
+reset their own password — there is no reset page — so re-issuing is
+`create_rater <username> --reset`. `createsuperuser` still exists for an
+administrative account, but a reviewer should not have one: a Django admin can
+rewrite and delete everyone else's ratings.
 
 Enable the git hooks (ruff, ty, codespell, Conventional Commits) once:
 
@@ -55,6 +61,12 @@ skipped, and a run with missing or ambiguous inputs is reported and skipped
 rather than guessed at. `--sub/--ses/--task/--run` narrow the import;
 `--base-dir` rebases the catalog's roots when the data moved after indexing.
 
+A few hundred runs is roughly an hour, so a run that fails is reported and the
+batch carries on; the exit status is non-zero if anything failed, and
+`--stop-on-error` aborts on the first one instead. `--dry-run` reports what
+would be ingested without writing anything — worth a few seconds before
+committing to the hour.
+
 Montage rendering parallelizes across `--workers` processes (default:
 CPUs − 2; a 96-component run takes a few seconds).
 
@@ -67,9 +79,29 @@ pixi run serve
 This collects static files and starts [granian](https://github.com/emmett-framework/granian)
 (async, uvloop) on <http://127.0.0.1:8000/>. Keyboard: `1`/`s` signal, `2`/`u` unknown,
 `3`/`n` noise, `←`/`→` prev/next component, `g` jump to an IC number.
+Tick the **auto-advance** box (or press `a`) to jump to the next component the
+moment a rating lands — which is most of the interaction when a run has ninety-six
+of them. The run list filters by subject, session, task or run, hides completed
+runs, and offers a resume link to the first component you have not rated.
+
 Human ratings are stored per user; the P(signal) strip in the verdict card
 colors each component by its human rating once one exists, so disagreements
 with FIX stand out as a color on the wrong side of the threshold line.
+
+## Transfer runs to a running deployment
+
+Ingest needs the raw NIfTIs and the catalog, so it happens on the laptop; once
+reviewers are working, the server's database is the authoritative copy of their
+ratings and must not be overwritten. `export_runs` bridges the two — a Django
+fixture plus a tar of montages, loaded on the far side with plain `loaddata`:
+
+```sh
+pixi run manage export_runs 301 302 --out ./outgoing
+```
+
+The fixture carries no human reviewer or classification, so it cannot overwrite
+anyone's work, and every model has a natural key, so loading is idempotent and
+assigns fresh primary keys. See [deploy.md](deploy.md) §6 for the server side.
 
 ## Deploy
 
@@ -91,6 +123,7 @@ pixi run -e dev test        # unit tests
 pixi run -e dev test-e2e    # playwright browser tests
 pixi run -e dev ruff check .
 pixi run -e dev ty check
+pixi run check-deploy       # Django's production system checks
 ```
 
 See [contributing.md](contributing.md) for layout and conventions. The

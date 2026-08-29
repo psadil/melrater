@@ -90,8 +90,28 @@ def run_inputs(root: Path):
 
 @pytest.fixture
 def media_root(tmp_path: Path, settings) -> Path:
-    settings.MEDIA_ROOT = tmp_path / "media"
-    return settings.MEDIA_ROOT
+    """Point both the montage store and the media view at a temp directory.
+
+    STORAGES has to be overridden, not just MEDIA_ROOT: Django resets its
+    storage handler when STORAGES changes and *not* when MEDIA_ROOT does, so
+    overriding only the latter leaves a cached FileSystemStorage happily
+    writing montages into the repository.
+    """
+    root = tmp_path / "media"
+    settings.MEDIA_ROOT = root
+    settings.STORAGES = {
+        **settings.STORAGES,
+        "montages": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+            "OPTIONS": {"location": str(root), "base_url": settings.MEDIA_URL},
+        },
+    }
+    return root
+
+
+def montage_dir(media_root: Path, run) -> Path:
+    """Where one run's montages land (keyed by uuid, not primary key)."""
+    return media_root / "runs" / str(run.uuid)
 
 
 @pytest.fixture
@@ -104,3 +124,46 @@ def ingested_run(melodic_dir: Path, media_root: Path):
 @pytest.fixture
 def user(django_user_model):
     return django_user_model.objects.create_user("rater", password="pw")
+
+
+@pytest.fixture
+def bare_runs(db):
+    """Make Run+Component rows directly, with no montage rendering.
+
+    Enough for query-count and run-list tests, and orders of magnitude cheaper
+    than ingesting: `ingested_run` renders nine images.
+    """
+    from melrater.core.models import Component, Run
+
+    made: list = []
+
+    def make(n: int, components: int = 3):
+        from_index = len(made)
+        for i in range(from_index, from_index + n):
+            run = Run.objects.create(
+                path=f"/data/run{i}",
+                label=f"run{i:03d}",
+                sub=f"{i:03d}",
+                task="rest",
+                tr=2.0,
+                n_timepoints=4,
+                fd=[],
+                frequencies=[],
+                metric_stats={"names": [], "dropped": [], "stats": {}},
+            )
+            Component.objects.bulk_create(
+                Component(
+                    run=run,
+                    index=j + 1,
+                    explained_var=1.0,
+                    total_var=1.0,
+                    timecourse=[],
+                    spectrum=[],
+                    metrics={},
+                )
+                for j in range(components)
+            )
+            made.append(run)
+        return made
+
+    return make

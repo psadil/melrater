@@ -118,11 +118,12 @@ COPY --chown=$MAMBA_USER:$MAMBA_USER src /app/src
 # Bake the static files. STATIC_ROOT is /app/staticfiles, nothing mounts over
 # it, and granian refuses to start when its static mount directory is missing —
 # so collecting here (rather than in the entrypoint, as dirt does) makes it an
-# immutable layer and takes the step off the start path. The throwaway key is
-# explicit rather than leaning on MELRATER_DEBUG's "1" default, so a later
-# settings change cannot turn this into ImproperlyConfigured. `check` shares the
-# RUN because it resolves the URLconf, which is what imports bidslake: an
-# over-eager prune fails the build here instead of 500ing every request.
+# immutable layer and takes the step off the start path. Both variables are
+# explicit: settings.py defaults DEBUG off, which makes MELRATER_SECRET_KEY
+# mandatory, and the build must not depend on either default staying put.
+# `check` shares the RUN because it resolves the URLconf, which is what imports
+# bidslake: an over-eager prune fails the build here instead of 500ing every
+# request.
 # `check` opens the database connection, and SQLite creates the file on
 # connect — so an empty db.sqlite3 would otherwise ship inside the image,
 # sitting under the mount point where only confusion can come of it.

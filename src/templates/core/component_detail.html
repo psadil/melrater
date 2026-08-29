@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 {% block title %}{{ run.label }} · IC {{ component.index }}{% endblock %}
+{% block head_extra %}
+  {# warm the next component's montage while this one is being judged #}
+  {% if prefetch_url %}<link rel="prefetch" as="image" href="{{ prefetch_url }}">{% endif %}
+{% endblock %}
 {% block content %}
 <div class="rating-page">
   <div class="toolbar">
@@ -33,9 +37,15 @@
                 hx-post="{% url 'set-axis' %}" hx-vals='{"axis": "{{ axis }}"}' hx-swap="none">{{ axis }}</button>
       {% endfor %}
     </div>
+    {% comment %}
+      Only the visible axis is fetched; melrater.js promotes data-src on the
+      first switch, which cuts the page from three montages (~200 kB) to one.
+      {# ... #} is single-line only, so a multi-line note has to be this tag.
+    {% endcomment %}
     {% for axis, url in montages.items %}
       <img class="montage{% if axis == active_axis %} active{% endif %}" data-axis-img="{{ axis }}"
-           src="{{ url }}" alt="{{ axis }} lightbox">
+           {% if axis == active_axis %}src="{{ url }}"{% else %}data-src="{{ url }}"{% endif %}
+           alt="{{ axis }} lightbox">
     {% endfor %}
     <div class="montage-caption">unthresholded: opacity &prop; (|z|/3)&sup2;, opaque above |z| = 3 ·
       red-yellow +, blue-lightblue &minus; (saturating at |z| = 10) ·

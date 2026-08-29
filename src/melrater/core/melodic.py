@@ -19,6 +19,13 @@ import numpy as np
 
 FIX_FILE_RE = re.compile(r"fix4melview_(?P<model>.+)_thr(?P<thr>\d+)\.txt$")
 
+#: The classification vocabulary, duplicated from Classification.Label so
+#: that this module stays Django-free. A verdict outside it is refused at
+#: parse time rather than stored: SQLite does not enforce max_length, so an
+#: unexpected token in column two would otherwise reach the database intact
+#: and out of the model's choices.
+FIX_LABELS = frozenset({"Signal", "Noise", "Unknown"})
+
 
 @dataclass(frozen=True)
 class FixVerdict:
@@ -59,6 +66,12 @@ class RunInputs:
     classifications: tuple[Path, ...]  # fix4melview_*_thr*.txt
     motion: np.ndarray  # (n_timepoints, 6) mcflirt order: 3 rot (rad), 3 trans (mm)
     icstats: np.ndarray  # (n_components, 2): explained %, total %
+    # BIDS entities as the catalog knows them; stored on the Run so the run
+    # list can filter by subject/task without re-parsing labels
+    sub: str = ""
+    ses: str = ""
+    task: str = ""
+    run: str = ""
 
 
 @dataclass(frozen=True)
@@ -79,6 +92,10 @@ class MelodicSource:
     ic_path: Path  # montage inputs, opened only at render time
     mean_path: Path
     mask_path: Path
+    sub: str = ""
+    ses: str = ""
+    task: str = ""
+    run: str = ""
 
     @property
     def n_components(self) -> int:
@@ -127,6 +144,11 @@ def parse_fix_file(path: Path) -> FixResult:
         if not line or line.startswith("["):
             break
         number, label, _, prob = (part.strip() for part in line.split(","))
+        if label not in FIX_LABELS:
+            raise ValueError(
+                f"{path.name}: component {number} has label {label!r}, "
+                f"which is not one of {sorted(FIX_LABELS)}"
+            )
         if int(number) != len(verdicts) + 1:
             raise ValueError(
                 f"{path.name}: expected component {len(verdicts) + 1}, "
@@ -187,4 +209,8 @@ def load_run(inputs: RunInputs) -> MelodicSource:
         ic_path=inputs.ic,
         mean_path=inputs.mean,
         mask_path=inputs.mask,
+        sub=inputs.sub,
+        ses=inputs.ses,
+        task=inputs.task,
+        run=inputs.run,
     )

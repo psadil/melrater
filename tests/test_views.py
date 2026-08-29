@@ -1,5 +1,6 @@
 import pytest
 
+from melrater.core import selectors, services
 from melrater.core.models import Classification, Run
 
 pytestmark = pytest.mark.django_db
@@ -190,7 +191,7 @@ def test_set_axis_requires_login(client, ingested_run: Run) -> None:
 def test_media_redirects_anonymous_to_login(client, ingested_run: Run) -> None:
     # Act
     response = client.get(
-        f"/media/runs/{ingested_run.pk}/ic001_axial.{ingested_run.montage_format}"
+        f"/media/runs/{ingested_run.uuid}/ic001_axial.{ingested_run.montage_format}"
     )
 
     # Assert
@@ -200,8 +201,143 @@ def test_media_redirects_anonymous_to_login(client, ingested_run: Run) -> None:
 def test_media_serves_montage_when_logged_in(logged_in, ingested_run: Run) -> None:
     # Act
     response = logged_in.get(
-        f"/media/runs/{ingested_run.pk}/ic001_axial.{ingested_run.montage_format}"
+        f"/media/runs/{ingested_run.uuid}/ic001_axial.{ingested_run.montage_format}"
     )
 
     # Assert: served by the Django view, so this works regardless of DEBUG
     assert response.status_code == 200
+
+
+# --- security surface ---------------------------------------------------
+
+
+def test_password_reset_is_not_routed(client) -> None:
+    # Act: the view django.contrib.auth.urls used to mount here rendered the
+    # admin's own template to anonymous visitors and then 500'd on submit
+    response = client.get("/accounts/password_reset/")
+
+    # Assert
+    assert response.status_code == 404
+
+
+def test_response_carries_a_content_security_policy(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    response = logged_in.get("/")
+
+    # Assert
+    assert "default-src 'self'" in response.headers["Content-Security-Policy"]
+
+
+def test_montage_response_is_cacheable_forever(logged_in, ingested_run: Run) -> None:
+    # Arrange: the ?v= revision makes the bytes at a URL immutable
+    url = f"/media/runs/{ingested_run.uuid}/ic001_axial.{ingested_run.montage_format}"
+
+    # Act
+    response = logged_in.get(url)
+
+    # Assert
+    assert "immutable" in response.headers["Cache-Control"]
+
+
+# --- run list at scale --------------------------------------------------
+
+
+def _query_count(client) -> int:
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    with CaptureQueriesContext(connection) as captured:
+        client.get("/")
+    return len(captured)
+
+
+def test_run_list_query_count_does_not_grow_with_runs(logged_in, bare_runs) -> None:
+    # Arrange
+    bare_runs(2)
+    few = _query_count(logged_in)
+
+    # Act
+    bare_runs(8)
+    many = _query_count(logged_in)
+
+    # Assert
+    assert many == few
+
+
+def test_run_list_filters_by_entity(logged_in, bare_runs) -> None:
+    # Arrange
+    bare_runs(3)
+
+    # Act
+    response = logged_in.get("/", {"q": "001"})
+
+    # Assert
+    assert response.context["result"].n_matching == 1
+
+
+def test_run_list_paginates(logged_in, bare_runs) -> None:
+    # Arrange
+    bare_runs(selectors.RUNS_PER_PAGE + 1)
+
+    # Act
+    response = logged_in.get("/")
+
+    # Assert
+    assert len(response.context["result"].rows) == selectors.RUNS_PER_PAGE
+
+
+def test_run_list_hides_complete_runs_on_request(logged_in, bare_runs, user) -> None:
+    # Arrange: rate every component of the only run
+    runs = bare_runs(1)
+    for component in runs[0].components.all():
+        services.rate_component(user=user, component=component, label="Signal")
+
+    # Act
+    response = logged_in.get("/", {"hide_complete": "1"})
+
+    # Assert
+    assert response.context["result"].rows == []
+
+
+def test_run_list_offers_a_resume_link(logged_in, bare_runs) -> None:
+    # Arrange
+    bare_runs(2)
+
+    # Act
+    response = logged_in.get("/")
+
+    # Assert
+    assert response.context["result"].resume.next_unrated == 1
+
+
+# --- montage loading ----------------------------------------------------
+
+
+def test_component_page_gives_only_the_active_axis_a_src(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    body = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/").content.decode()
+
+    # Assert: two of the three montages wait behind data-src until switched to
+    assert body.count('data-src="/media/') == 2
+
+
+def test_component_page_prefetches_the_next_montage(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    body = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/").content.decode()
+
+    # Assert
+    assert 'rel="prefetch" as="image" href="/media/runs/' in body
+
+
+def test_component_page_leaks_no_template_syntax(logged_in, ingested_run: Run) -> None:
+    # Assert: Django's {# ... #} is single-line only, so a multi-line note
+    # renders as visible page text instead of disappearing
+    body = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/").content.decode()
+
+    assert "{#" not in body and "{%" not in body

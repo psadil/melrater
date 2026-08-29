@@ -174,3 +174,28 @@ code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-siz
 }
 .login-card button { width: 100%; margin-top: 4px; }
 .form-error { color: var(--noise); font-size: 12px; margin-bottom: 8px; }
+
+/* run-list filter + pager */
+.run-filter {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 14px;
+}
+.filter-q {
+  flex: 1; min-width: 180px; background: var(--panel2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 5px 9px; font: inherit;
+}
+.filter-toggle {
+  display: flex; gap: 5px; align-items: center; color: var(--muted);
+  font-size: 12px; white-space: nowrap;
+}
+.run-filter .resume { border-color: var(--accent); color: var(--accent); }
+.pager { display: flex; gap: 10px; align-items: center; justify-content: center; margin-top: 14px; }
+
+/* auto-advance toggle in the rating bar */
+.autoadvance {
+  display: flex; gap: 5px; align-items: center; margin-left: 16px;
+  color: var(--muted); font-size: 12px; white-space: nowrap; cursor: pointer;
+}
+.autoadvance kbd {
+  font: 10px ui-monospace, monospace; background: #00000055;
+  border-radius: 3px; padding: 1px 4px; color: var(--muted);
+}

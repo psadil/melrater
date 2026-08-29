@@ -147,3 +147,14 @@ def test_load_run_rejects_icstats_component_mismatch(melodic_dir: Path) -> None:
     # Act / Assert
     with pytest.raises(ValueError, match="component counts"):
         melodic.load_run(short)
+
+
+def test_fix_file_with_an_unknown_label_is_refused(tmp_path) -> None:
+    # Arrange: SQLite does not enforce max_length, so an unexpected token in
+    # column two would otherwise be stored verbatim as a Classification label
+    path = tmp_path / "fix4melview_M_thr5.txt"
+    path.write_text("ica\n1, Maybe, False, 0.9\n")
+
+    # Act / Assert
+    with pytest.raises(ValueError, match="Maybe"):
+        melodic.parse_fix_file(path)
