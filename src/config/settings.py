@@ -79,7 +79,7 @@ if BEHIND_TLS_PROXY:
 CSRF_COOKIE_HTTPONLY = True
 
 # W004 (HSTS): browsers do not apply HSTS to IP literals, and this deployment is
-# addressed by IP (deploy.md §1.2). W008 (SSL redirect): Caddy already redirects
+# addressed by IP (see the README's deploy notes). W008 (SSL redirect): Caddy already redirects
 # http->https, and doing it again in Django would only add a hop. Silenced
 # deliberately, so that a *new* warning from `check --deploy` is visible rather
 # than lost in two that will never be actioned.

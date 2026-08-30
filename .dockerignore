@@ -17,7 +17,6 @@ staticfiles
 tests
 # server-side deployment config; the build has no use for it
 deploy
-deploy.md
 .pytest_cache
 .ruff_cache
 .vscode

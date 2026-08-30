@@ -11,12 +11,12 @@ if TYPE_CHECKING:
     from django.db.models.fields.related_descriptors import RelatedManager
 
 
-# Every model below carries a natural key, which is what lets `export_runs` and
+# Every model below carries a natural key, which is what lets `dumpdata` and
 # `loaddata` move runs between databases: with --natural-primary the fixture
 # holds no primary keys at all, so an imported run gets a fresh id on the target
 # without colliding with anything already there, and re-importing the same
-# fixture updates rather than duplicates. See melrater/core/management/commands/
-# export_runs.py and deploy.md.
+# fixture updates rather than duplicates. That is the fallback path for when the
+# ingest API is unreachable; see the README.
 
 
 class RunManager(models.Manager["Run"]):

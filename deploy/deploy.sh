@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # Deploy melrater. Runs from the LAPTOP, not the server — the image cannot be
 # built on the box (the build compiles bidslake, a Rust extension bundling
-# DuckDB's C++; see deploy.md §3), so the whole sequence starts here and the
-# server only ever receives a finished image and two config files.
+# DuckDB's C++; see "Build and ship" in the README), so the whole sequence
+# starts here and the server only ever receives a finished image and two config
+# files.
 #
 #   ./deploy/deploy.sh
 #
-# Override the target with MELRATER_SERVER (default: the ~/.ssh/config Host
-# block described in deploy.md §1) or the tag with MELRATER_TAG.
+# Override the target with MELRATER_SERVER (the default is the ~/.ssh/config
+# Host block the README sets up under "SSH access") or the tag with MELRATER_TAG.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-SERVER=${MELRATER_SERVER:-melrater-box}
+SERVER=${MELRATER_SERVER:-hetzner}
 TAG=${MELRATER_TAG:-psadil/melrater:latest}
 
 # The commit stamped onto the server in step 5 would be a lie about a dirty

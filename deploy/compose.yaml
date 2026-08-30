@@ -25,9 +25,10 @@ services:
       MELRATER_ALLOWED_HOSTS: ${MELRATER_HOST:?set it in /srv/melrater/.env},127.0.0.1
       MELRATER_CSRF_TRUSTED_ORIGINS: https://${MELRATER_HOST}
       MELRATER_BEHIND_TLS_PROXY: "1"
-      # Turn on /api/v1/ so `push_runs` can deliver runs (deploy.md §6). It is
-      # off by default outside a source checkout, so this line is the whole
-      # opt-in; with it off the endpoint 401s whatever credentials arrive.
+      # Turn on /api/v1/ so `push_runs` can deliver runs (see the README on
+      # pushing to a deployment). It is off by default outside a source
+      # checkout, so this line is the whole opt-in; with it off the endpoint
+      # 401s whatever credentials arrive.
       MELRATER_INGEST_ENABLED: "1"
     volumes:
       # absolute, so they do not depend on where compose is run from
