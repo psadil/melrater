@@ -17,6 +17,7 @@ from django.views.decorators.http import require_http_methods
 from django.views.static import serve
 
 from melrater.core import charts, selectors, services
+from melrater.core import help as help_catalog
 from melrater.core.metrics import OUTLIER_Z, family_of
 from melrater.core.models import Component, Run
 from melrater.core.montage import AXES
@@ -97,6 +98,9 @@ class MetricRow:
     z_fmt: str
     severity: str
     glyph: str
+    # the row's title= tooltip: 175 of these ship with the page, so the
+    # definition goes in the attribute rather than in 175 more popovers
+    help_title: str
 
 
 @dataclass(frozen=True)
@@ -105,6 +109,7 @@ class MetricFamily:
     rows: list[MetricRow]
     max_z_fmt: str
     color: str
+    help_key: str
 
 
 def _metric_panel(run_data: RunData, comp: ComponentData) -> dict:
@@ -122,6 +127,7 @@ def _metric_panel(run_data: RunData, comp: ComponentData) -> dict:
                 z_fmt=f"{z:+.1f}",
                 severity=charts.severity_color(z),
                 glyph=charts.metric_glyph_svg(z, s.p5, s.p25, s.p75, s.p95, s.signal_z),
+                help_title=help_catalog.metric_tooltip(name),
             )
         )
     outliers = sorted((r for r in rows if r.abs_z > OUTLIER_Z), key=lambda r: -r.abs_z)
@@ -137,6 +143,7 @@ def _metric_panel(run_data: RunData, comp: ComponentData) -> dict:
                 rows=members,
                 max_z_fmt=f"{max_z:.1f}",
                 color=charts.severity_color(max_z),
+                help_key=help_catalog.family_key(fam_name),
             )
         )
     return {

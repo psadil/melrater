@@ -120,5 +120,22 @@ task's own env, where it wins.
   value interpolated into them is a float or a palette constant, and labels are
   used only as dictionary keys; keep it that way, or the templates need
   escaping instead.
+- **Help text** lives in `melrater/core/help.toml`, loaded by `help.py` —
+  Django-free and typed like the rest of the domain, so a docs build can render
+  the same prose the `?` popovers show. Entries are plain strings with
+  structure in separate fields (`bullets`, `columns`, `refs`); they go through
+  normal autoescaping and must never reach `|safe` or a chart. The `[legacy]`
+  table is copied verbatim from pyFIX's `legacy.py` at the sha pinned in
+  `[refs.pyfix]` — re-copy it rather than editing it, and note that it fixes
+  each family's column count, which `build()` checks `columns` against at
+  import. A metric name the catalog has never seen degrades to its bare name;
+  that is load-bearing, because names come from a run's `features.csv`.
+- **Popovers** (`partials/help_bubble.html`) use the native `popovertarget`
+  attribute and no JavaScript. The top layer is the point — `.side` scrolls and
+  `body` is `overflow: hidden`, so any other bubble would be clipped. Two
+  consequences worth remembering: a panel is still a DOM child of its anchor,
+  so `.help-pop` has to reset the inherited text properties, and a `<button>`
+  is an atomic inline, so a `?` at the end of a caption needs `.nobr` or it
+  wraps onto a line of its own.
 - **Django template comments are single-line.** `{# ... #}` spanning two lines
   renders as visible page text; use `{% comment %}` for anything longer.

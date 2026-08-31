@@ -199,3 +199,63 @@ code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-siz
   font: 10px ui-monospace, monospace; background: #00000055;
   border-radius: 3px; padding: 1px 4px; color: var(--muted);
 }
+
+/* --- help bubbles ---------------------------------------------------------
+   A `?` and a native popover. `popovertarget` needs no JavaScript, and the
+   top layer is the point: `.side` scrolls and `body` is overflow:hidden, so a
+   normally-positioned bubble would be clipped at the panel edge. Position is
+   fixed rather than anchored to the button — CSS anchor positioning is not
+   yet portable, and one constant location is easier to learn anyway. */
+.help-btn {
+  flex: none; width: 15px; height: 15px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--panel2); color: var(--muted);
+  font: 10px/1 system-ui, sans-serif; cursor: help; vertical-align: middle;
+}
+.help-btn:hover, .help-btn:focus-visible { color: var(--accent); border-color: var(--accent); }
+
+.help-pop {
+  position: fixed; inset: auto; right: 424px; bottom: 84px; margin: 0;
+  width: 380px; max-height: 60vh; overflow-y: auto;
+  background: var(--panel2); color: var(--text);
+  border: 1px solid var(--accent); border-radius: 8px; padding: 11px 13px;
+  font: 12px/1.55 system-ui, -apple-system, sans-serif;
+  box-shadow: 0 8px 28px #00000080;
+  /* The top layer does not break inheritance: a panel is still a DOM child
+     of whatever it is anchored to, so it would come out uppercase inside a
+     .card-title and refuse to wrap inside a .meta-chip. A panel should look
+     the same wherever its `?` happens to sit — reset the text properties the
+     anchors set rather than chasing them one at a time. */
+  text-transform: none; letter-spacing: normal; text-align: left;
+  white-space: normal; font-style: normal; word-break: normal;
+}
+.help-pop b {
+  display: block; margin-bottom: 5px; color: var(--accent);
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+}
+.help-pop ul { margin: 7px 0 0; padding-left: 17px; color: var(--muted); }
+.help-pop li { margin-bottom: 2px; }
+.help-pop cite { display: block; margin-top: 8px; font-size: 11px; font-style: normal; }
+.help-pop cite a { color: var(--muted); }
+/* the family bubble sits in the details body, so it only shows once expanded */
+details > .help-btn { margin: 3px 0 5px; }
+
+/* Popover is baseline in every browser this app targets, but if it is missing
+   the panel would render inline as an ordinary div — hide the whole mechanism
+   instead, and the metric rows' title= tooltips still carry the definitions. */
+@supports not selector(:popover-open) {
+  .help-btn, .help-pop { display: none; }
+}
+
+/* room for a `?` beside the things it explains */
+.card-title-text { display: flex; gap: 6px; align-items: center; }
+.meta-chip { display: inline-flex; gap: 5px; align-items: center; }
+.toolbar-right { display: inline-flex; gap: 6px; align-items: center; }
+/* A button is an atomic inline, so there is a wrap opportunity beside it
+   whether or not any whitespace is there — a `?` at the end of a wide caption
+   drops onto a line of its own. Keep it with the word it follows. */
+.nobr { white-space: nowrap; }
+
+/* flex anchors space the `?` with gap; these inline ones need a margin */
+.montage-caption .help-btn, .strip-legend .help-btn, .verdict-p .help-btn {
+  margin-left: 4px;
+}

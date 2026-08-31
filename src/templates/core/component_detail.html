@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load help_tags %}
 {% block title %}{{ run.label }} · IC {{ component.index }}{% endblock %}
 {% block head_extra %}
   {# warm the next component's montage while this one is being judged #}
@@ -18,15 +19,16 @@
       <a class="nav-btn" href="{% url 'component-detail' run.pk next_unrated %}">next unrated &#8674;</a>
     {% endif %}
     <span class="meta-chip">{{ run.label }}</span>
-    <span class="meta-chip">TR {{ tr_fmt }} s</span>
-    <span class="meta-chip">expl. var {{ expl_var_fmt }}%</span>
-    <span class="meta-chip">total var {{ total_var_fmt }}%</span>
+    <span class="meta-chip">TR {{ tr_fmt }} s{% help_bubble "field.tr" %}</span>
+    <span class="meta-chip">expl. var {{ expl_var_fmt }}%{% help_bubble "field.explained_var" %}</span>
+    <span class="meta-chip">total var {{ total_var_fmt }}%{% help_bubble "field.total_var" %}</span>
     <span class="toolbar-right">
       {% if n_outliers %}
         <a class="chip chip-alert" href="#metrics">&#9888; {{ n_outliers }} outlier metric{{ n_outliers|pluralize }} (|z|&gt;{{ outlier_z|floatformat:0 }})</a>
       {% else %}
         <span class="chip chip-ok">no outlying metrics</span>
       {% endif %}
+      {% help_bubble "field.outliers" %}
     </span>
   </div>
 
@@ -49,15 +51,23 @@
     {% endfor %}
     <div class="montage-caption">unthresholded: opacity &prop; (|z|/3)&sup2;, opaque above |z| = 3 ·
       red-yellow +, blue-lightblue &minus; (saturating at |z| = 10) ·
-      labels are voxel indices · axial/coronal shown neurological (subject L on image left)</div>
+      labels are voxel indices · axial/coronal shown neurological (subject L on image
+      <span class="nobr">left){% help_bubble "chart.montage" %}</span></div>
   </div>
 
   <div class="side">
     {% include "core/partials/verdict_card.html" %}
-    <div class="card"><div class="card-title">timecourse + motion</div>{{ tc_fd_svg|safe }}</div>
-    <div class="card"><div class="card-title">spectrum</div>{{ spectrum_svg|safe }}</div>
+    <div class="card">
+      <div class="card-title"><span class="card-title-text">timecourse + motion
+        {% help_bubble "chart.timecourse_fd" %}</span></div>{{ tc_fd_svg|safe }}
+    </div>
+    <div class="card">
+      <div class="card-title"><span class="card-title-text">spectrum
+        {% help_bubble "chart.spectrum" %}</span></div>{{ spectrum_svg|safe }}
+    </div>
     <div class="card metrics-card" id="metrics">
-      <div class="card-title">FIX metrics
+      <div class="card-title"><span class="card-title-text">FIX metrics
+        {% help_bubble "chart.metric_glyph" %}</span>
         <span>{% if n_outliers %}<span class="chip chip-alert">&#9888; {{ n_outliers }} outliers</span>
         {% else %}<span class="chip chip-ok">no outliers</span>{% endif %}</span>
       </div>
@@ -68,10 +78,16 @@
         <div class="metric-empty">no metric exceeds |z| &gt; {{ outlier_z|floatformat:0 }} — nothing anomalous</div>
       {% endif %}
       <div class="metric-section">all families</div>
+      {% comment %}
+        The family's `?` sits in the details body, not in the summary: a button
+        inside <summary> would need JS to stop its click from toggling the
+        disclosure, and you open a family to read its rows anyway.
+      {% endcomment %}
       {% for fam in metric_families %}
         <details>
           <summary>{{ fam.name }} <span class="fam-n">{{ fam.rows|length }}</span>
             <span class="famz" style="color:{{ fam.color }}">max|z| {{ fam.max_z_fmt }}</span></summary>
+          {% help_bubble fam.help_key %}
           {% for row in fam.rows %}{% include "core/partials/metric_row.html" %}{% endfor %}
         </details>
       {% endfor %}

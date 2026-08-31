@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 from melrater.core import selectors, services
@@ -343,3 +345,44 @@ def test_component_page_leaks_no_template_syntax(logged_in, ingested_run: Run) -
     body = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/").content.decode()
 
     assert "{#" not in body and "{%" not in body
+
+
+# --- help bubbles -------------------------------------------------------
+
+
+def test_component_page_explains_a_toolbar_chip(logged_in, ingested_run: Run) -> None:
+    # Act
+    body = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/").content.decode()
+
+    # Assert
+    assert 'id="help-field-tr"' in body
+
+
+def test_component_page_gives_every_help_panel_a_unique_id(
+    logged_in, ingested_run: Run
+) -> None:
+    # Assert: popovers are addressed by id, so a repeat would open the wrong one
+    body = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/").content.decode()
+    ids = re.findall(r'id="(help-[^"]+)"', body)
+
+    assert len(ids) == len(set(ids))
+
+
+def test_component_page_omits_help_for_an_undocumented_family(
+    logged_in, ingested_run: Run
+) -> None:
+    # Assert: the fixture's features are invented names, so the catalog has
+    # nothing for them and the family bubbles render as nothing at all
+    body = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/").content.decode()
+
+    assert "help-metric-" not in body
+
+
+def test_rating_response_carries_the_verdict_help(logged_in, ingested_run: Run) -> None:
+    # Act: the out-of-band swap replaces the whole verdict card
+    response = logged_in.post(
+        f"/runs/{ingested_run.pk}/ic/1/rate/", {"label": "Signal"}
+    )
+
+    # Assert
+    assert 'id="help-field-fix-verdict"' in response.content.decode()

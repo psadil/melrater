@@ -1,12 +1,15 @@
+{% load help_tags %}
 <div class="card" id="verdict-card"{% if oob %} hx-swap-oob="true"{% endif %}>
-  <div class="card-title">FIX verdict</div>
+  <div class="card-title"><span class="card-title-text">FIX verdict
+    {% help_bubble "field.fix_verdict" %}</span></div>
   {% for v in fix_rows %}
     <div class="verdict-row">
       <span class="meta-chip">{{ v.reviewer }}</span>
       <span class="verdict verdict-{{ v.label|lower }}">{{ v.label|upper }}</span>
       {% if v.probability is not None %}
         <span class="verdict-p">P(signal) = {{ v.probability_fmt }}
-          {% if v.threshold is not None %}<em>vs thr {{ v.threshold }}</em>{% endif %}</span>
+          {% if v.threshold is not None %}<em>vs thr {{ v.threshold }}</em>{% endif %}
+          {% if forloop.first %}{% help_bubble "field.p_signal" %}{% endif %}</span>
       {% endif %}
     </div>
   {% empty %}
@@ -15,6 +18,6 @@
   {% if prob_strip %}
     {{ prob_strip|safe }}
     <div class="strip-legend">tall tick = rated (color = human label) ·
-      faint tick = unrated (FIX label) · dot = this IC</div>
+      faint tick = unrated (FIX label) · dot = this IC{% help_bubble "chart.prob_strip" %}</div>
   {% endif %}
 </div>

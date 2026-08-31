@@ -3,6 +3,14 @@
 # regenerated verbatim, so neither linted nor reformatted
 extend-exclude = ["src/melrater/core/_lake_models.py"]
 
+# There is no [project] table for ruff to read requires-python from, so it
+# assumes an older interpreter than pixi.toml pins and sorts tomllib (3.11+)
+# into the third-party block. Naming it here fixes the sort without setting
+# target-version, which would also let the formatter rewrite unrelated files
+# into 3.14-only syntax.
+[tool.ruff.lint.isort]
+extra-standard-library = ["tomllib"]
+
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"
 pythonpath = ["src"]

@@ -1,0 +1,17 @@
+{% comment %}
+  No whitespace before the button: in a caption or a chip it would be a line
+  break opportunity, and the `?` would wrap onto a line of its own. Inline
+  contexts get their spacing from a margin in the stylesheet instead.
+{% endcomment %}{% if entry %}<button class="help-btn" type="button"
+  popovertarget="help-{{ entry.slug }}"
+  aria-label="what is {{ entry.title }}?">?</button>
+  <div id="help-{{ entry.slug }}" class="help-pop" popover>
+    <b>{{ entry.title }}</b>
+    <p>{{ entry.body }}</p>
+    {% if entry.bullets %}
+      <ul>{% for bullet in entry.bullets %}<li>{{ bullet }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% for link in entry.links %}
+      <cite><a href="{{ link.url }}" target="_blank" rel="noopener">{{ link.text }}</a></cite>
+    {% endfor %}
+  </div>{% endif %}

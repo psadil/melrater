@@ -104,3 +104,82 @@ def test_auto_advance_moves_to_the_next_component(
 
     # Assert
     assert logged_in_page.url.endswith("/ic/2/")
+
+
+# --- help bubbles -------------------------------------------------------
+
+
+def test_help_button_opens_its_panel(
+    logged_in_page, live_server, ingested_run: Run
+) -> None:
+    # Arrange
+    logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
+
+    # Act
+    logged_in_page.click('[popovertarget="help-chart-metric-glyph"]')
+
+    # Assert
+    expect(logged_in_page.locator("#help-chart-metric-glyph")).to_be_visible()
+
+
+def test_escape_dismisses_the_help_panel(
+    logged_in_page, live_server, ingested_run: Run
+) -> None:
+    # Arrange
+    logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
+    logged_in_page.click('[popovertarget="help-chart-spectrum"]')
+
+    # Act
+    logged_in_page.keyboard.press("Escape")
+
+    # Assert
+    expect(logged_in_page.locator("#help-chart-spectrum")).not_to_be_visible()
+
+
+def test_help_panel_escapes_the_scrolling_side_panel(
+    logged_in_page, live_server, ingested_run: Run
+) -> None:
+    # Arrange: .side scrolls and body is overflow:hidden, so a panel that was
+    # not in the top layer would come back clipped to less than its 380px
+    logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
+
+    # Act
+    logged_in_page.click('[popovertarget="help-field-outliers"]')
+    box = logged_in_page.locator("#help-field-outliers").bounding_box()
+
+    # Assert
+    assert box["width"] == 380
+
+
+def test_family_help_renders_for_a_documented_family(
+    logged_in_page, live_server, documented_run: Run
+) -> None:
+    # Arrange: the family's `?` sits in the details body, not the summary,
+    # so it appears only once the family is open
+    logged_in_page.goto(f"{live_server.url}/runs/{documented_run.pk}/ic/1/")
+    logged_in_page.click("summary:has-text('tsjump')")
+
+    # Act
+    logged_in_page.click('[popovertarget="help-metric-tsjump"]')
+
+    # Assert
+    expect(logged_in_page.locator("#help-metric-tsjump")).to_contain_text(
+        "frame-to-frame jumps"
+    )
+
+
+def test_metric_row_title_carries_the_definition(
+    logged_in_page, live_server, documented_run: Run
+) -> None:
+    # Arrange
+    logged_in_page.goto(f"{live_server.url}/runs/{documented_run.pk}/ic/1/")
+
+    # Assert: the legacy pyFIX label and the column's meaning, on two lines
+    title = logged_in_page.locator(
+        '.metric-name[title^="tsjump:0"]'
+    ).first.get_attribute("title")
+
+    assert title == (
+        "tsjump:0 · ts.jump.max.abs.diff\nlargest absolute frame-to-frame change, "
+        "in units of the timecourse's own standard deviation"
+    )

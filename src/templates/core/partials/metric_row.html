@@ -1,5 +1,5 @@
 <div class="metric-row">
-  <span class="metric-name" title="{{ row.name }}">{{ row.name }}</span>
+  <span class="metric-name" title="{{ row.help_title }}">{{ row.name }}</span>
   {{ row.glyph|safe }}
   <span class="metric-val">{{ row.raw_fmt }}<em style="color:{{ row.severity }}">z={{ row.z_fmt }}</em></span>
 </div>

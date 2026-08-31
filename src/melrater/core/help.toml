@@ -1,0 +1,827 @@
+# Help text for melrater's rating screen.
+#
+# One catalog, three consumers: the `?` popovers on the component page, the
+# `title=` tooltip on every metric row, and (potentially) a documentation page
+# — melrater/core/help.py is Django-free, so anything that can import it can
+# render this file.
+#
+# Keys are namespaced by what they describe:
+#
+#   chart.*   a rendered figure on the component page
+#   field.*   a single displayed number or verdict
+#   metric.*  one pyFIX feature family (the part of a name before the colon)
+#   legacy    pyFIX name -> the label the original R/MATLAB FIX used
+#
+# Every entry has a title and a body; bullets, refs, columns and source are
+# optional. `columns` is index-aligned to the `:N` suffix, so its length must
+# equal that family's column count. Prose only — no markup: the template
+# renders these through Django's autoescaping and they must never reach a
+# chart, which is emitted with |safe.
+
+[refs.salimi2014]
+text = "Salimi-Khorshidi et al. (2014), NeuroImage 90:449-468"
+url = "https://doi.org/10.1016/j.neuroimage.2013.11.046"
+
+[refs.power2012]
+text = "Power et al. (2012), NeuroImage 59:2142-2154"
+url = "https://doi.org/10.1016/j.neuroimage.2011.10.018"
+
+# pyFIX, pinned to the commit these descriptions were read from, so the links
+# cannot rot when upstream moves. To refresh: bump the sha here and in the
+# [legacy] header, re-read feature.py, and re-check the `columns` arrays.
+[refs.pyfix]
+text = "pyFIX feature.py"
+url = "https://git.fmrib.ox.ac.uk/fsl/pyfix/-/blob/4fd579aed58dbb4645e12ff6cddccc99e93d4329/pyfix/feature.py"
+
+[refs.gofigure]
+text = "Taylor et al. (2025), Go Figure"
+url = "https://doi.org/10.52294/001c.125391"
+
+
+# --- figures --------------------------------------------------------------
+
+[chart.montage]
+title = "spatial map"
+body = """
+This component's z-map painted over the run's mean functional image, as a \
+lightbox of 25 slices spread through the volume. Nothing is thresholded away: \
+weak voxels fade out rather than disappearing, so you can see what is not \
+there as well as what is."""
+bullets = [
+  "opacity rises as (|z| / 3)-squared, and is fully opaque above |z| = 3",
+  "red through yellow for positive z, blue through light blue for negative, saturating at |z| = 10",
+  "the number in each panel is that panel's voxel slice index",
+  "axial and coronal are neurological: the subject's left is on the left of the image",
+  "sagittal panels put posterior on the left, anterior on the right",
+]
+refs = ["gofigure"]
+
+[chart.timecourse_fd]
+title = "timecourse and head motion"
+body = """
+Above, this component's contribution over time, normalised to its own peak and \
+centred on zero — the units are arbitrary, so only the shape matters. Below, \
+framewise displacement for the whole run, on the same time axis, so you can \
+line up excursions in the timecourse against moments the head moved."""
+bullets = [
+  "one gridline every 60 seconds",
+  "dashed lines mark FD = 0.2 mm (amber) and 0.5 mm (red), the usual scrubbing thresholds",
+  "spikes that coincide with FD spikes are motion, whatever the spatial map looks like",
+]
+refs = ["power2012"]
+
+[chart.spectrum]
+title = "power spectrum"
+body = """
+MELODIC's power spectrum for this component's timecourse, normalised to its \
+own peak. The unshaded region is 0.01-0.1 Hz, the band resting-state signal \
+usually lives in; everything outside it is shaded."""
+bullets = [
+  "a peak inside the band, falling away above it, is what signal looks like",
+  "power piled up at high frequency is a classic artefact signature",
+  "a spike at one narrow frequency suggests a periodic source, such as a scanner or physiological artefact",
+]
+
+[chart.metric_glyph]
+title = "reading a metric strip"
+body = """
+Each row is one pyFIX feature, shown as a robust z-score measured across this \
+run's own components. The strip therefore says how unusual this component is \
+here — not how it compares with any external norm."""
+bullets = [
+  "wide dark bar: 5th to 95th percentile across this run's components",
+  "lighter inner bar: 25th to 75th percentile",
+  "vertical line: the run's median, which is z = 0 by construction",
+  "green ticks: where the components FIX called Signal fall on this feature",
+  "dot: this component. Grey up to |z| = 2, amber to 3, red beyond",
+  "the axis is clipped at |z| = 6, so a dot at the edge may be far outside it",
+]
+refs = ["salimi2014"]
+
+[chart.prob_strip]
+title = "P(signal) across the run"
+body = """
+Every component in the run placed on a log axis by the probability FIX gave \
+it, so you can see where this one sits among the rest."""
+bullets = [
+  "dashed amber line: the threshold this classifier was run at",
+  "tall tick: a component you have already rated, coloured by your label",
+  "faint short tick: not yet rated, coloured by FIX's label",
+  "blue dot: the component you are looking at",
+  "a tall tick on the far side of the threshold from its colour is a disagreement with FIX",
+]
+
+
+# --- single values --------------------------------------------------------
+
+[field.fix_verdict]
+title = "FIX verdict"
+body = """
+What the trained FIX classifier decided for this component, one row per \
+classifier and threshold applied to this run. It is shown for reference and \
+does not constrain your rating — disagreeing with it is the point of rating."""
+refs = ["salimi2014"]
+
+[field.p_signal]
+title = "P(signal) and threshold"
+body = """
+FIX's estimated probability that this component is signal, and the threshold \
+it was compared against. A component is called Signal when its probability \
+clears the threshold; a lower threshold keeps more components and removes \
+less, so it is the conservative setting for denoising."""
+
+[field.tr]
+title = "repetition time"
+body = """
+Seconds between volumes. It sets the time axis under the timecourse and the \
+frequency axis under the spectrum, so a run with an unusual TR shifts what \
+counts as a high frequency."""
+
+[field.explained_var]
+title = "explained variance"
+body = """
+The percentage of variance that this component accounts for, out of the \
+variance that survived MELODIC's dimensionality reduction. Compare it with \
+total variance: the gap between the two is whatever the PCA step discarded."""
+
+[field.total_var]
+title = "total variance"
+body = """
+The percentage of variance in the original 4D data that this component \
+accounts for. It is the number that says how much removing this component \
+would actually change the data, so a high-variance artefact deserves more \
+care than a low-variance one."""
+
+[field.outliers]
+title = "outlying metrics"
+body = """
+How many of this component's pyFIX features sit more than 3 robust z from the \
+run's median. Robust z is (value - median) / (1.4826 x MAD), computed feature \
+by feature across this run's components, so a handful of extreme components \
+cannot inflate the scale the way a standard deviation would. Features that are \
+constant across the run carry no information and are dropped before scoring."""
+bullets = [
+  "a high count means this component is unusual for this run, not that it is necessarily noise",
+  "zero is common and unremarkable, especially for low-variance components",
+]
+
+
+# --- pyFIX feature families -----------------------------------------------
+#
+# One entry per feature extractor in pyFIX's feature.py. `source` names that
+# function; the loader turns it into a link against [refs.pyfix]. `columns`
+# is index-aligned to the `:N` suffix and is checked against [legacy] at load,
+# so a family either describes all of its columns or none of them.
+#
+# pyFIX's own functions carry no docstrings, so these descriptions were read
+# off the implementations at the pinned commit. Where the legacy label and the
+# code disagree, the code wins — see metric.spatialoverlap.
+
+[metric.nic]
+title = "number of components"
+body = """
+How many independent components MELODIC extracted for this run. It is the same \
+for every component, so melrater drops it before z-scoring and it never appears \
+in the list below."""
+source = "nic"
+
+[metric.arvswgn]
+title = "autoregressive fall-off vs white noise"
+body = """
+Fits autoregressive models of order 1 through 6 to the timecourse and records \
+how the residual variance falls as the order rises, summarised as a straight \
+line. White noise gains almost nothing from a higher order; a smooth, \
+autocorrelated timecourse gains a lot."""
+source = "arvswgn"
+columns = [
+  "slope of the residual variance across AR orders 1-6",
+  "intercept of that line",
+]
+
+[metric.arfull]
+title = "AR(1) and AR(2) fits"
+body = """
+Yule-Walker autoregressive fits of the timecourse. BOLD signal is smooth and \
+strongly autocorrelated, so its AR coefficients are large and its residual \
+variance small; noise-like timecourses are the other way round."""
+source = "arfull"
+columns = [
+  "AR(1) residual (noise) variance",
+  "AR(1) coefficient",
+  "AR(2) residual (noise) variance",
+  "AR(2) first coefficient",
+  "AR(2) second coefficient",
+]
+
+[metric.skewness]
+title = "timecourse skewness"
+body = """
+Third moment of the timecourse. A strongly skewed timecourse — a flat baseline \
+with occasional one-sided excursions — points at spikes or drift rather than \
+the oscillation you would expect from signal."""
+source = "skewness"
+
+[metric.kurtosis]
+title = "timecourse kurtosis"
+body = """
+Fourth moment of the timecourse, non-excess, so a Gaussian scores 3. Heavy \
+tails mean a few frames dominate the whole timecourse, which is the signature \
+of a jump or spike artefact."""
+source = "kurtosis"
+
+[metric.mean_median]
+title = "mean minus median"
+body = """
+Asymmetry of the timecourse's amplitude distribution. It sits near zero for a \
+symmetric timecourse and moves away when a handful of extreme frames drag the \
+mean off the bulk of the data."""
+source = "mean_median"
+
+[metric.entropy]
+title = "timecourse entropy"
+body = """
+Two measures of how Gaussian the timecourse's amplitude distribution is. \
+Artefact timecourses are often very sparse — mostly flat, with a few large \
+excursions — which reads as unusually low entropy."""
+source = "entropy"
+columns = [
+  "Shannon entropy of the timecourse histogram",
+  "a negentropy-style non-Gaussianity score of the standardised timecourse",
+]
+
+[metric.tsjump]
+title = "frame-to-frame jumps"
+body = """
+How far the timecourse moves between neighbouring volumes. Sudden large steps \
+are the fingerprint of motion and spike artefacts. The last three follow \
+features 5 and 6 of Poldrack (2008), as pyFIX's comments note."""
+source = "tsjump"
+columns = [
+  "largest absolute frame-to-frame change, in units of the timecourse's own standard deviation",
+  "largest absolute change, in units of the standard deviation of the changes",
+  "mean squared frame-to-frame change, relative to the timecourse variance",
+  "largest change over the mean of the remaining changes, excluding the five frames around the peak",
+  "largest change over the sum of those remaining changes",
+  "lag-1 autocorrelation of the demeaned timecourse",
+]
+
+[metric.fftcoarse]
+title = "high- against low-frequency power"
+body = """
+Total spectral amplitude above a cut-off divided by the amplitude below it, at \
+four cut-offs. Resting-state signal is concentrated at low frequency, so a \
+large ratio means the component is dominated by fast fluctuation."""
+source = "fftcoarse"
+columns = [
+  "cut-off 0.10 Hz",
+  "cut-off 0.15 Hz",
+  "cut-off 0.20 Hz",
+  "cut-off 0.25 Hz",
+]
+
+[metric.fftfiner]
+title = "spectral power by band"
+body = """
+The spectrum above 0.01 Hz split into seven bands and normalised to sum to 1, \
+so each value is the fraction of power in that band and power below 0.01 Hz is \
+excluded entirely. Despite what the name suggests, these are shares of the \
+spectrum rather than high-to-low ratios."""
+source = "fftfiner"
+columns = [
+  "share of power in 0.01-0.025 Hz",
+  "share in 0.025-0.05 Hz",
+  "share in 0.05-0.1 Hz",
+  "share in 0.1-0.15 Hz",
+  "share in 0.15-0.2 Hz",
+  "share in 0.2-0.25 Hz",
+  "share above 0.25 Hz",
+]
+
+[metric.fftfinerwrtnull]
+title = "spectral bands against an HRF null"
+body = """
+The same seven bands, compared against what plausible BOLD would look like: \
+white noise convolved with a single-gamma HRF, averaged over 100 draws. Each \
+value is the squared departure from that null relative to the band's own \
+power, so a large value means the band looks nothing like BOLD."""
+source = "fftfinerwrtnull"
+columns = [
+  "departure from the null in 0.01-0.025 Hz",
+  "departure in 0.025-0.05 Hz",
+  "departure in 0.05-0.1 Hz",
+  "departure in 0.1-0.15 Hz",
+  "departure in 0.15-0.2 Hz",
+  "departure in 0.2-0.25 Hz",
+  "departure above 0.25 Hz",
+  "sum of the seven departures",
+]
+
+[metric.motioncorrelation]
+title = "correlation with head motion"
+body = """
+How well the realignment parameters explain this component's timecourse. A \
+component that tracks head motion is motion, however plausible its spatial map \
+looks."""
+source = "motioncorrelation"
+columns = [
+  "largest absolute correlation with the six rigid-body motion parameters",
+  "largest absolute correlation with the remaining (derivative) motion regressors",
+  "the larger of the two above",
+  "second largest standardised regression weight across all motion regressors",
+  "largest standardised regression weight",
+  "mean of the largest half of the standardised regression weights",
+]
+
+[metric.oupjk]
+title = "Ornstein-Uhlenbeck fit"
+body = """
+Fits the timecourse as a mean-reverting random walk, jackknifed over two halves \
+because the plain maximum-likelihood estimate is biased towards fast reversion. \
+Together the two parameters say how volatile the timecourse is and how quickly \
+it snaps back to its mean."""
+source = "oupjk"
+columns = [
+  "sigma, the volatility of the process",
+  "lambda, the speed of mean reversion — large when the timecourse returns immediately, as noise does",
+]
+
+[metric.clusterdist]
+title = "cluster size distribution"
+body = """
+Clusters the absolute map at |z| = 2.5, keeps clusters larger than 4 voxels, \
+and describes the sizes that result. A network is a few large clusters; \
+scattered speckle is many tiny ones."""
+source = "clusterdist"
+columns = [
+  "number of clusters larger than 4 voxels",
+  "mean minus median cluster size",
+  "largest cluster, in voxels",
+  "variance of the cluster sizes",
+  "skewness of the cluster sizes",
+  "kurtosis of the cluster sizes, non-excess",
+  "largest cluster volume, in cubic mm",
+  "second largest cluster volume, in cubic mm",
+  "third largest cluster volume, in cubic mm",
+]
+
+[metric.negativevspositive]
+title = "positive against negative lobes"
+body = """
+Compares the two halves of the signed spatial map. Real networks are mostly \
+one-signed, whereas many artefacts come as balanced positive/negative pairs, \
+so a component whose lobes mirror each other is suspect."""
+source = "negativevspositive"
+columns = [
+  "entropy of the signed map",
+  "entropy of the absolute map",
+  "mean of the signed map over the mean of the absolute map, both in absolute value",
+  "the same ratio, rescaled by the two maps' standard deviations",
+  "difference between the positive and negative voxel counts, over the positive count",
+  "the same, counting only voxels beyond |z| = 2.5",
+]
+
+[metric.zstattofuncratio]
+title = "map against mean EPI intensity"
+body = """
+Compares the component map, smoothed at 5 mm, with the run's mean functional \
+image, both as a product and as a ratio. Some artefacts sit exactly where the \
+mean image is dark — outside the brain, in a dropout region, or on a vessel."""
+source = "zstattofuncratio"
+columns = [
+  "99th percentile of |map x mean EPI|",
+  "95th percentile of |map x mean EPI|",
+  "99th percentile of |map / mean EPI|",
+  "95th percentile of |map / mean EPI|",
+]
+
+[metric.slicewisestats]
+title = "concentration in single slices"
+body = """
+How much of the map falls on any one slice. A component confined to one or two \
+slices is an acquisition artefact rather than anything anatomical. The two \
+counting columns are often identical across a run's components, in which case \
+melrater drops them."""
+source = "slicewisestats"
+columns = [
+  "number of slices holding more than 15% of the map's total squared intensity",
+  "largest share of that squared intensity held by any single slice",
+  "number of slices holding more than 15% of the voxels beyond |z| = 2.5",
+  "largest share of those suprathreshold voxels held by any single slice",
+]
+
+[metric.everynthvariance]
+title = "odd/even slice alternation"
+body = """
+Looks for maps whose intensity alternates from slice to slice — the signature \
+of interleaved acquisition, or of a multiband slice grouping."""
+source = "everynthvariance"
+columns = [
+  "difference between odd-slice and even-slice energy, over total energy",
+  "the same, grouping slices in pairs rather than singly",
+  "as the first, computed on the per-slice variance of the map thresholded at |z| = 2.5",
+  "as the second, on that thresholded map",
+]
+
+[metric.masktscorrandoverlap]
+title = "tissue timecourses and overlap"
+body = """
+Regresses the component timecourse on the mean white-matter, grey-matter and \
+CSF timecourses, then measures how much of the spatial map lands in each \
+tissue. Signal should be grey matter; components loading on CSF or white \
+matter are usually noise. The three overlap triples differ in what they \
+weight: total intensity, suprathreshold voxel count, then suprathreshold \
+intensity."""
+source = "masktscorrandoverlap"
+columns = [
+  "regression weight on the mean white-matter timecourse",
+  "regression weight on the mean grey-matter timecourse",
+  "regression weight on the mean CSF timecourse",
+  "share of the map's total |z| in CSF",
+  "share of the map's total |z| in grey matter",
+  "share of the map's total |z| in white matter",
+  "share of the suprathreshold voxels in CSF",
+  "share of the suprathreshold voxels in grey matter",
+  "share of the suprathreshold voxels in white matter",
+  "share of the suprathreshold |z| in CSF",
+  "share of the suprathreshold |z| in grey matter",
+  "share of the suprathreshold |z| in white matter",
+]
+
+[metric.smoothest]
+title = "spatial smoothness"
+body = """
+FSL smoothest's RESEL count for the component map inside the brain mask — \
+roughly, how many independent resolution elements the map contains. Very \
+smooth maps tend to be physiological or motion-related; very rough ones tend \
+to be noise."""
+source = "smoothest"
+
+[metric.spatialoverlap]
+title = "white-matter overlap"
+body = """
+Share of the map's total |z| falling in white matter, scaled by the voxel \
+volume in cubic mm. Note that pyFIX's legacy label for this column is \
+smoothness.mm, which is a misnomer inherited from the old feature ordering: \
+the code computes a white-matter overlap, not a smoothness."""
+source = "spatialoverlap"
+
+[metric.maxtfce]
+title = "cluster-like structure (TFCE)"
+body = """
+Threshold-free cluster enhancement rewards voxels that are both strong and \
+part of a broad cluster, so the maximum after enhancement is a compactness \
+score. Networks are compact; scattered noise is not. Run at H = 2, E = 0.5, \
+6-connectivity."""
+source = "maxtfce"
+columns = [
+  "maximum TFCE of |z| divided by the map's standard deviation",
+  "maximum TFCE of |z|",
+  "maximum TFCE of |z| after thresholding at 2.5",
+]
+
+
+[metric.edgemasks]
+title = "overlap with the brain edge"
+body = """
+Five shells eroded inward from the brain mask, shell 1 being the outermost and \
+each one after it a single erosion deeper. Rim-shaped components — motion, \
+susceptibility, ghosting — pile up on the outer shells, so a component that \
+loads on shell 1 and not on shell 5 is almost certainly an edge artefact."""
+source = "edgemasks"
+columns = [
+  "shell 1: share of the suprathreshold voxels lying in the shell",
+  "shell 1: share of the suprathreshold |z| lying in the shell",
+  "shell 1: share of the shell that the component covers",
+  "shell 2: share of the suprathreshold voxels lying in the shell",
+  "shell 2: share of the suprathreshold |z| lying in the shell",
+  "shell 2: share of the shell that the component covers",
+  "shell 3: share of the suprathreshold voxels lying in the shell",
+  "shell 3: share of the suprathreshold |z| lying in the shell",
+  "shell 3: share of the shell that the component covers",
+  "shell 4: share of the suprathreshold voxels lying in the shell",
+  "shell 4: share of the suprathreshold |z| lying in the shell",
+  "shell 4: share of the shell that the component covers",
+  "shell 5: share of the suprathreshold voxels lying in the shell",
+  "shell 5: share of the suprathreshold |z| lying in the shell",
+  "shell 5: share of the shell that the component covers",
+]
+
+[metric.sagmasks]
+title = "overlap with vein and sagittal masks"
+body = """
+Twelve standard-space masks intersected with the component map: four mask \
+sets, each at three dilations (none, dilated once, dilated twice). Set 0 is \
+the major-vein mask where the run provides one. Vein and sagittal-sinus \
+components are a common and easily missed class of noise. Legacy labels read \
+maskRC, where R is the mask set 0-3 and C the dilation 1-3."""
+source = "sagmasks"
+columns = [
+  "set 0 (veins), undilated: share of the suprathreshold voxels inside the mask",
+  "set 0 (veins), undilated: share of the suprathreshold |z| inside the mask",
+  "set 0 (veins), undilated: share of the mask that the component covers",
+  "set 0 (veins), undilated: correlation of the mask with the thresholded map",
+  "set 0 (veins), undilated: correlation of the mask with the |z| map",
+  "set 0 (veins), undilated: correlation of the mask with |z|, over suprathreshold voxels only",
+  "set 0 (veins), dilated: share of the suprathreshold voxels inside the mask",
+  "set 0 (veins), dilated: share of the suprathreshold |z| inside the mask",
+  "set 0 (veins), dilated: share of the mask that the component covers",
+  "set 0 (veins), dilated: correlation of the mask with the thresholded map",
+  "set 0 (veins), dilated: correlation of the mask with the |z| map",
+  "set 0 (veins), dilated: correlation of the mask with |z|, over suprathreshold voxels only",
+  "set 0 (veins), twice dilated: share of the suprathreshold voxels inside the mask",
+  "set 0 (veins), twice dilated: share of the suprathreshold |z| inside the mask",
+  "set 0 (veins), twice dilated: share of the mask that the component covers",
+  "set 0 (veins), twice dilated: correlation of the mask with the thresholded map",
+  "set 0 (veins), twice dilated: correlation of the mask with the |z| map",
+  "set 0 (veins), twice dilated: correlation of the mask with |z|, over suprathreshold voxels only",
+  "set 1, undilated: share of the suprathreshold voxels inside the mask",
+  "set 1, undilated: share of the suprathreshold |z| inside the mask",
+  "set 1, undilated: share of the mask that the component covers",
+  "set 1, undilated: correlation of the mask with the thresholded map",
+  "set 1, undilated: correlation of the mask with the |z| map",
+  "set 1, undilated: correlation of the mask with |z|, over suprathreshold voxels only",
+  "set 1, dilated: share of the suprathreshold voxels inside the mask",
+  "set 1, dilated: share of the suprathreshold |z| inside the mask",
+  "set 1, dilated: share of the mask that the component covers",
+  "set 1, dilated: correlation of the mask with the thresholded map",
+  "set 1, dilated: correlation of the mask with the |z| map",
+  "set 1, dilated: correlation of the mask with |z|, over suprathreshold voxels only",
+  "set 1, twice dilated: share of the suprathreshold voxels inside the mask",
+  "set 1, twice dilated: share of the suprathreshold |z| inside the mask",
+  "set 1, twice dilated: share of the mask that the component covers",
+  "set 1, twice dilated: correlation of the mask with the thresholded map",
+  "set 1, twice dilated: correlation of the mask with the |z| map",
+  "set 1, twice dilated: correlation of the mask with |z|, over suprathreshold voxels only",
+  "set 2, undilated: share of the suprathreshold voxels inside the mask",
+  "set 2, undilated: share of the suprathreshold |z| inside the mask",
+  "set 2, undilated: share of the mask that the component covers",
+  "set 2, undilated: correlation of the mask with the thresholded map",
+  "set 2, undilated: correlation of the mask with the |z| map",
+  "set 2, undilated: correlation of the mask with |z|, over suprathreshold voxels only",
+  "set 2, dilated: share of the suprathreshold voxels inside the mask",
+  "set 2, dilated: share of the suprathreshold |z| inside the mask",
+  "set 2, dilated: share of the mask that the component covers",
+  "set 2, dilated: correlation of the mask with the thresholded map",
+  "set 2, dilated: correlation of the mask with the |z| map",
+  "set 2, dilated: correlation of the mask with |z|, over suprathreshold voxels only",
+  "set 2, twice dilated: share of the suprathreshold voxels inside the mask",
+  "set 2, twice dilated: share of the suprathreshold |z| inside the mask",
+  "set 2, twice dilated: share of the mask that the component covers",
+  "set 2, twice dilated: correlation of the mask with the thresholded map",
+  "set 2, twice dilated: correlation of the mask with the |z| map",
+  "set 2, twice dilated: correlation of the mask with |z|, over suprathreshold voxels only",
+  "set 3, undilated: share of the suprathreshold voxels inside the mask",
+  "set 3, undilated: share of the suprathreshold |z| inside the mask",
+  "set 3, undilated: share of the mask that the component covers",
+  "set 3, undilated: correlation of the mask with the thresholded map",
+  "set 3, undilated: correlation of the mask with the |z| map",
+  "set 3, undilated: correlation of the mask with |z|, over suprathreshold voxels only",
+  "set 3, dilated: share of the suprathreshold voxels inside the mask",
+  "set 3, dilated: share of the suprathreshold |z| inside the mask",
+  "set 3, dilated: share of the mask that the component covers",
+  "set 3, dilated: correlation of the mask with the thresholded map",
+  "set 3, dilated: correlation of the mask with the |z| map",
+  "set 3, dilated: correlation of the mask with |z|, over suprathreshold voxels only",
+  "set 3, twice dilated: share of the suprathreshold voxels inside the mask",
+  "set 3, twice dilated: share of the suprathreshold |z| inside the mask",
+  "set 3, twice dilated: share of the mask that the component covers",
+  "set 3, twice dilated: correlation of the mask with the thresholded map",
+  "set 3, twice dilated: correlation of the mask with the |z| map",
+  "set 3, twice dilated: correlation of the mask with |z|, over suprathreshold voxels only",
+]
+
+[metric.stripe]
+title = "stripe and ghosting pattern"
+body = """
+Smooths the map before and after taking its absolute value and takes the 95th \
+percentile of the difference. The two agree on a smooth map and diverge on a \
+fine alternating one, so a large value points at striping or Nyquist \
+ghosting."""
+source = "stripe"
+
+[metric.dim]
+title = "image dimensions"
+body = """
+Matrix size of the input 4D data: x, y, z, and the number of volumes. These are \
+the same for every component in a run, so melrater drops them before z-scoring \
+and they never appear in the list below."""
+source = "dim"
+columns = [
+  "x dimension, in voxels",
+  "y dimension, in voxels",
+  "z dimension, in voxels",
+  "number of volumes",
+]
+
+[metric.pixdim]
+title = "voxel dimensions"
+body = """
+Voxel size along each axis and the repetition time, straight from the NIfTI \
+header. These are the same for every component in a run, so melrater drops them \
+before z-scoring and they never appear in the list below."""
+source = "pixdim"
+columns = [
+  "voxel size along x, in mm",
+  "voxel size along y, in mm",
+  "voxel size along z, in mm",
+  "repetition time, in seconds",
+]
+
+
+# --- legacy labels --------------------------------------------------------
+#
+# pyFIX name -> the label the original R/MATLAB FIX used for the same column.
+# Copied verbatim from LEGACY_FEATURE_LABELS in pyFIX's legacy.py at the sha
+# pinned in [refs.pyfix]; regenerate from upstream rather than hand-editing.
+# https://git.fmrib.ox.ac.uk/fsl/pyfix/-/blob/4fd579aed58dbb4645e12ff6cddccc99e93d4329/pyfix/legacy.py
+#
+# These are what a metric row's tooltip shows next to the pyFIX name, and they
+# also fix each family's column count, which `columns` above is checked against.
+
+[legacy]
+"nic"                     = "number.of.ics"
+"arvswgn:0"               = "ar.drop.slope"
+"arvswgn:1"               = "ar.drop.offset"
+"arfull:0"                = "ar1.noise.var"
+"arfull:1"                = "ar1.param"
+"arfull:2"                = "ar2.noise.var"
+"arfull:3"                = "ar2.param1"
+"arfull:4"                = "ar2.param2"
+"skewness"                = "ts.skewness"
+"kurtosis"                = "ts.kurtosis"
+"mean_median"             = "ts.mean.min.median"
+"entropy:0"               = "ts.entropy1"
+"entropy:1"               = "ts.entropy2"
+"tsjump:0"                = "ts.jump.max.abs.diff"
+"tsjump:1"                = "ts.jump.max.abs.diff.std"
+"tsjump:2"                = "ts.jump.max.abs.diff.std.len"
+"tsjump:3"                = "ts.jump.max.abs.diff.std.localmean"
+"tsjump:4"                = "ts.jump.max.abs.diff.std.localsum"
+"tsjump:5"                = "ts.xcorr"
+"fftcoarse:0"             = "fft.coarse.10"
+"fftcoarse:1"             = "fft.coarse.15"
+"fftcoarse:2"             = "fft.coarse.20"
+"fftcoarse:3"             = "fft.coarse.25"
+"fftfiner:0"              = "fft.finer.01"
+"fftfiner:1"              = "fft.finer.025"
+"fftfiner:2"              = "fft.finer.05"
+"fftfiner:3"              = "fft.finer.10"
+"fftfiner:4"              = "fft.finer.15"
+"fftfiner:5"              = "fft.finer.20"
+"fftfiner:6"              = "fft.finer.25"
+"fftfinerwrtnull:0"       = "fft.H0r.01"
+"fftfinerwrtnull:1"       = "fft.H0r.025"
+"fftfinerwrtnull:2"       = "fft.H0r.05"
+"fftfinerwrtnull:3"       = "fft.H0r.10"
+"fftfinerwrtnull:4"       = "fft.H0r.15"
+"fftfinerwrtnull:5"       = "fft.H0r.20"
+"fftfinerwrtnull:6"       = "fft.H0r.25"
+"fftfinerwrtnull:7"       = "fft.H0r"
+"motioncorrelation:0"     = "mcorr.max"
+"motioncorrelation:1"     = "mcorr.max.grad"
+"motioncorrelation:2"     = "mcorr.max.max"
+"motioncorrelation:3"     = "mcorr.reg.2nd.max"
+"motioncorrelation:4"     = "mcorr.reg.max"
+"motioncorrelation:5"     = "mcorr.reg.mean"
+"oupjk:0"                 = "ts.oup.sigma"
+"oupjk:1"                 = "ts.oup.lambda"
+"clusterdist:0"           = "cluster.num"
+"clusterdist:1"           = "cluster.mean.min.median"
+"clusterdist:2"           = "cluster.max"
+"clusterdist:3"           = "cluster.var"
+"clusterdist:4"           = "cluster.skew"
+"clusterdist:5"           = "cluster.kurt"
+"clusterdist:6"           = "cluster.max1"
+"clusterdist:7"           = "cluster.max2"
+"clusterdist:8"           = "cluster.max3"
+"negativevspositive:0"    = "negpos.entropy"
+"negativevspositive:1"    = "negpos.abs.entropy"
+"negativevspositive:2"    = "negpos.mean.ratio"
+"negativevspositive:3"    = "negpos.stdmean.ratio"
+"negativevspositive:4"    = "negpos.ratio"
+"negativevspositive:5"    = "negpos.ratio.thresh"
+"zstattofuncratio:0"      = "zxfunc.99prctl"
+"zstattofuncratio:1"      = "zxfunc.95prctl"
+"zstattofuncratio:2"      = "z2func.99prctl"
+"zstattofuncratio:3"      = "z2func.95prctl"
+"slicewisestats:0"        = "num.slice.bt.15prcnt"
+"slicewisestats:1"        = "max.slice.prcnt"
+"slicewisestats:2"        = "thr.num.slice.bt.15prcnt"
+"slicewisestats:3"        = "thr.max.slice.prcnt"
+"everynthvariance:0"      = "every.2nd.single.var"
+"everynthvariance:1"      = "every.2nd.pair.var"
+"everynthvariance:2"      = "thr.every.2nd.single.var"
+"everynthvariance:3"      = "thr.every.2nd.pair.var"
+"masktscorrandoverlap:0"  = "wm.ts.coef"
+"masktscorrandoverlap:1"  = "gm.ts.coef"
+"masktscorrandoverlap:2"  = "csf.ts.coef"
+"masktscorrandoverlap:3"  = "prcnt.on.csf"
+"masktscorrandoverlap:4"  = "prcnt.on.gm"
+"masktscorrandoverlap:5"  = "prcnt.on.wm"
+"masktscorrandoverlap:6"  = "thr.prcnt.on.csf"
+"masktscorrandoverlap:7"  = "thr.prcnt.on.gm"
+"masktscorrandoverlap:8"  = "thr.prcnt.on.wm"
+"masktscorrandoverlap:9"  = "thr.both.prcnt.on.csf"
+"masktscorrandoverlap:10" = "thr.both.prcnt.on.gm"
+"masktscorrandoverlap:11" = "thr.both.prcnt.on.wm"
+"smoothest:0"             = "smoothness"
+"spatialoverlap"          = "smoothness.mm"
+"maxtfce:0"               = "std.then.tfce.max"
+"maxtfce:1"               = "tfce.max"
+"maxtfce:2"               = "thr.then.tfce"
+"edgemasks:0"             = "percent.on.edge.bin1"
+"edgemasks:1"             = "percent.on.edge.norm1"
+"edgemasks:2"             = "percent.of.edge1"
+"edgemasks:3"             = "percent.on.edge.bin2"
+"edgemasks:4"             = "percent.on.edge.norm2"
+"edgemasks:5"             = "percent.of.edge2"
+"edgemasks:6"             = "percent.on.edge.bin3"
+"edgemasks:7"             = "percent.on.edge.norm3"
+"edgemasks:8"             = "percent.of.edge3"
+"edgemasks:9"             = "percent.on.edge.bin4"
+"edgemasks:10"            = "percent.on.edge.norm4"
+"edgemasks:11"            = "percent.of.edge4"
+"edgemasks:12"            = "percent.on.edge.bin5"
+"edgemasks:13"            = "percent.on.edge.norm5"
+"edgemasks:14"            = "percent.of.edge5"
+"sagmasks:0"              = "percent.on.mask01.bin"
+"sagmasks:1"              = "percent.on.mask01.norm"
+"sagmasks:2"              = "percent.of.mask01"
+"sagmasks:3"              = "cc01a"
+"sagmasks:4"              = "cc01b"
+"sagmasks:5"              = "cc01c"
+"sagmasks:6"              = "percent.on.mask02.bin"
+"sagmasks:7"              = "percent.on.mask02.norm"
+"sagmasks:8"              = "percent.of.mask02"
+"sagmasks:9"              = "cc02a"
+"sagmasks:10"             = "cc02b"
+"sagmasks:11"             = "cc02c"
+"sagmasks:12"             = "percent.on.mask03.bin"
+"sagmasks:13"             = "percent.on.mask03.norm"
+"sagmasks:14"             = "percent.of.mask03"
+"sagmasks:15"             = "cc03a"
+"sagmasks:16"             = "cc03b"
+"sagmasks:17"             = "cc03c"
+"sagmasks:18"             = "percent.on.mask11.bin"
+"sagmasks:19"             = "percent.on.mask11.norm"
+"sagmasks:20"             = "percent.of.mask11"
+"sagmasks:21"             = "cc11a"
+"sagmasks:22"             = "cc11b"
+"sagmasks:23"             = "cc11c"
+"sagmasks:24"             = "percent.on.mask12.bin"
+"sagmasks:25"             = "percent.on.mask12.norm"
+"sagmasks:26"             = "percent.of.mask12"
+"sagmasks:27"             = "cc12a"
+"sagmasks:28"             = "cc12b"
+"sagmasks:29"             = "cc12c"
+"sagmasks:30"             = "percent.on.mask13.bin"
+"sagmasks:31"             = "percent.on.mask13.norm"
+"sagmasks:32"             = "percent.of.mask13"
+"sagmasks:33"             = "cc13a"
+"sagmasks:34"             = "cc13b"
+"sagmasks:35"             = "cc13c"
+"sagmasks:36"             = "percent.on.mask21.bin"
+"sagmasks:37"             = "percent.on.mask21.norm"
+"sagmasks:38"             = "percent.of.mask21"
+"sagmasks:39"             = "cc21a"
+"sagmasks:40"             = "cc21b"
+"sagmasks:41"             = "cc21c"
+"sagmasks:42"             = "percent.on.mask22.bin"
+"sagmasks:43"             = "percent.on.mask22.norm"
+"sagmasks:44"             = "percent.of.mask22"
+"sagmasks:45"             = "cc22a"
+"sagmasks:46"             = "cc22b"
+"sagmasks:47"             = "cc22c"
+"sagmasks:48"             = "percent.on.mask23.bin"
+"sagmasks:49"             = "percent.on.mask23.norm"
+"sagmasks:50"             = "percent.of.mask23"
+"sagmasks:51"             = "cc23a"
+"sagmasks:52"             = "cc23b"
+"sagmasks:53"             = "cc23c"
+"sagmasks:54"             = "percent.on.mask31.bin"
+"sagmasks:55"             = "percent.on.mask31.norm"
+"sagmasks:56"             = "percent.of.mask31"
+"sagmasks:57"             = "cc31a"
+"sagmasks:58"             = "cc31b"
+"sagmasks:59"             = "cc31c"
+"sagmasks:60"             = "percent.on.mask32.bin"
+"sagmasks:61"             = "percent.on.mask32.norm"
+"sagmasks:62"             = "percent.of.mask32"
+"sagmasks:63"             = "cc32a"
+"sagmasks:64"             = "cc32b"
+"sagmasks:65"             = "cc32c"
+"sagmasks:66"             = "percent.on.mask33.bin"
+"sagmasks:67"             = "percent.on.mask33.norm"
+"sagmasks:68"             = "percent.of.mask33"
+"sagmasks:69"             = "cc33a"
+"sagmasks:70"             = "cc33b"
+"sagmasks:71"             = "cc33c"
+"stripe:0"                = "stripe.patt"
+"dim:0"                   = "xlen"
+"dim:1"                   = "ylen"
+"dim:2"                   = "zlen"
+"dim:3"                   = "tlen"
+"pixdim:0"                = "xres"
+"pixdim:1"                = "yres"
+"pixdim:2"                = "zres"
+"pixdim:3"                = "tres"
