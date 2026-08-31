@@ -24,7 +24,14 @@ manage = "python -m django"
 collectstatic = "python -m django collectstatic --noinput"
 # The production system checks, run against production-shaped settings. The
 # values are throwaways; the point is DEBUG off and a proxy in front.
-check-deploy = { cmd = "python -m django check --deploy", env = { MELRATER_DEBUG = "0", MELRATER_SECRET_KEY = "check-only-throwaway", MELRATER_ALLOWED_HOSTS = "example.invalid", MELRATER_CSRF_TRUSTED_ORIGINS = "https://example.invalid", MELRATER_BEHIND_TLS_PROXY = "1" } }
+# MELRATER_SECRET_KEY is not optional here: settings.py raises
+# ImproperlyConfigured for an empty one whenever DEBUG is off, so dropping it
+# crashes the task rather than checking anything. Its awkward length is the
+# other half — W009 warns under 50 characters, and a check that always warns is
+# a check nobody reads. Nothing signs anything with this value; the *dev*
+# fallback key in settings.py is the opposite case, keeping its
+# `django-insecure-` prefix so W009 does fire if that one ever escapes.
+check-deploy = { cmd = "python -m django check --deploy", env = { MELRATER_DEBUG = "0", MELRATER_SECRET_KEY = "check-only-throwaway-not-used-to-sign-anything-at-all", MELRATER_ALLOWED_HOSTS = "example.invalid", MELRATER_CSRF_TRUSTED_ORIGINS = "https://example.invalid", MELRATER_BEHIND_TLS_PROXY = "1" } }
 # Refresh the typed catalog vocabulary (melrater/core/_lake_models.py) from a
 # feat-adapter catalog, after re-indexing or a bidslake bump:
 #   pixi run regen-lake-models path/to/study.duckdb
