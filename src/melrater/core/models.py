@@ -8,6 +8,9 @@ if TYPE_CHECKING:
     # Stub-only (django-stubs): the type of a reverse FK accessor. Declaring
     # the accessors as plain annotations gives them types without the mypy
     # plugin; Django ignores un-assigned annotations, so no field is created.
+    # The annotations below name this import without quoting it, which is only
+    # safe because PEP 649 (3.14) made annotations lazy — nothing evaluates
+    # them at runtime, so a name that exists only for the type checker is fine.
     from django.db.models.fields.related_descriptors import RelatedManager
 
 
@@ -20,7 +23,7 @@ if TYPE_CHECKING:
 
 
 class RunManager(models.Manager["Run"]):
-    def get_by_natural_key(self, uuid: str) -> "Run":
+    def get_by_natural_key(self, uuid: str) -> Run:
         return self.get(uuid=uuid)
 
 
@@ -67,7 +70,7 @@ class Run(models.Model):
 
     objects: ClassVar[RunManager] = RunManager()
 
-    components: "RelatedManager[Component]"
+    components: RelatedManager[Component]
 
     class Meta:
         indexes: ClassVar = [models.Index(fields=["label"])]
@@ -80,7 +83,7 @@ class Run(models.Model):
 
 
 class ComponentManager(models.Manager["Component"]):
-    def get_by_natural_key(self, index: int, run_uuid: str) -> "Component":
+    def get_by_natural_key(self, index: int, run_uuid: str) -> Component:
         return self.get(index=index, run__uuid=run_uuid)
 
 
@@ -97,7 +100,7 @@ class Component(models.Model):
 
     objects: ClassVar[ComponentManager] = ComponentManager()
 
-    classifications: "RelatedManager[Classification]"
+    classifications: RelatedManager[Classification]
 
     class Meta:
         ordering: ClassVar = ["run", "index"]
@@ -115,7 +118,7 @@ class Component(models.Model):
 
 
 class ReviewerManager(models.Manager["Reviewer"]):
-    def get_by_natural_key(self, name: str) -> "Reviewer":
+    def get_by_natural_key(self, name: str) -> Reviewer:
         return self.get(name=name)
 
 
@@ -143,7 +146,7 @@ class Reviewer(models.Model):
 
     objects: ClassVar[ReviewerManager] = ReviewerManager()
 
-    classifications: "RelatedManager[Classification]"
+    classifications: RelatedManager[Classification]
 
     def natural_key(self) -> tuple[str]:
         return (str(self.name),)
@@ -155,7 +158,7 @@ class Reviewer(models.Model):
 class ClassificationManager(models.Manager["Classification"]):
     def get_by_natural_key(
         self, index: int, run_uuid: str, reviewer_name: str
-    ) -> "Classification":
+    ) -> Classification:
         return self.get(
             component__index=index,
             component__run__uuid=run_uuid,

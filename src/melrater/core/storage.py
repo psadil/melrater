@@ -137,5 +137,5 @@ def _remove_empty_directory(prefix: str) -> None:
 def _listdir(prefix: str) -> tuple[list[str], list[str]]:
     try:
         return montage_storage().listdir(prefix)
-    except (FileNotFoundError, NotADirectoryError):
+    except FileNotFoundError, NotADirectoryError:
         return [], []

@@ -55,7 +55,7 @@ task's own env, where it wins.
 - **Typing**: checked by ty with no rule overrides. django-stubs (PEP 561
   stubs only, no mypy plugin; dev env) resolves managers, field descriptor
   values, and `request.user`; reverse FK accessors are declared as stub-only
-  annotations on the models (`components: "RelatedManager[Component]"` —
+  annotations on the models (`components: RelatedManager[Component]` —
   Django ignores un-assigned annotations); views narrow `request.user`
   through `_authed_user`. JSONField payloads have pydantic schemas
   (`schemas.py`), and selectors project ORM rows into those typed models at
