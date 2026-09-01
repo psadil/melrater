@@ -1,12 +1,18 @@
 # The deployed stack. rsynced to /srv/melrater/compose.yaml by deploy/deploy.sh;
 # edit it here, never on the server, or the next deploy overwrites your change.
 #
-# Every value that names the box comes from MELRATER_HOST in /srv/melrater/.env,
-# because the address has to agree in four places and each disagreement fails
-# differently and silently: a wrong ALLOWED_HOSTS 400s every request, a wrong
-# CSRF_TRUSTED_ORIGINS 403s every POST, and a wrong default_sni kills the TLS
-# handshake while the log still says the certificate was obtained successfully.
+# TLS termination and routing live in the shared `proxy` stack (its own repo,
+# at /srv/proxy on the box): this stack publishes no ports and joins the
+# external `proxy` docker network the edge routes over (created once with
+# `docker network create proxy`). MELRATER_HOST still comes from
+# /srv/melrater/.env and has to agree with the proxy's PROXY_HOST — a wrong
+# ALLOWED_HOSTS 400s every request, a wrong CSRF_TRUSTED_ORIGINS 403s every
+# POST.
 name: melrater
+
+networks:
+  proxy:
+    external: true
 
 services:
   melrater:
@@ -14,9 +20,10 @@ services:
     # `docker compose up -d` on the box uses.
     image: ${MELRATER_TAG:-psadil/melrater:latest}
     restart: unless-stopped
-    # no ports: only caddy touches the host network stack, which is also what
-    # makes MELRATER_BEHIND_TLS_PROXY safe — nothing but the proxy can set
-    # X-Forwarded-Proto if the app is unreachable any other way.
+    networks: [proxy]
+    # no ports: only the proxy's caddy touches the host network stack, which
+    # is also what makes MELRATER_BEHIND_TLS_PROXY safe — nothing but the
+    # proxy can set X-Forwarded-Proto if the app is unreachable any other way.
     environment:
       MELRATER_DEBUG: "0"
       MELRATER_SECRET_KEY: ${MELRATER_SECRET_KEY:?set it in /srv/melrater/.env}
@@ -50,26 +57,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
-    logging:
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
-
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    # Caddy expands {$MELRATER_HOST} in the Caddyfile from its OWN environment,
-    # which is a different mechanism from compose's ${...} above even though
-    # both end up reading /srv/melrater/.env. It has to be passed in explicitly.
-    environment:
-      MELRATER_HOST: ${MELRATER_HOST:?set it in /srv/melrater/.env}
-    ports: ["80:80", "443:443", "443:443/udp"]
-    volumes:
-      - /srv/melrater/Caddyfile:/etc/caddy/Caddyfile:ro
-      - /srv/melrater/caddy/data:/data     # certificates; must persist
-      - /srv/melrater/caddy/config:/config
-    # the app service's logs are capped above; caddy would otherwise inherit
-    # docker's unbounded default onto the same disk as db.sqlite3, and a full
-    # disk here surfaces as SQLite write failures rather than as a disk error
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }

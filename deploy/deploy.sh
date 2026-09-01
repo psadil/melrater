@@ -44,10 +44,11 @@ docker run --rm --entrypoint python "$TAG" \
 echo "==> 3/6 push the image"
 docker push "$TAG"
 
-# Named files only. Never a directory sync and never --delete: db/, media/,
-# backups/ and caddy/data live in that same directory.
+# Named files only. Never a directory sync and never --delete: db/, media/ and
+# backups/ live in that same directory. (TLS/routing config belongs to the
+# proxy repo and never travels from here.)
 echo "==> 4/6 ship the config"
-rsync -av deploy/compose.yaml deploy/Caddyfile "$SERVER":/srv/melrater/
+rsync -av deploy/compose.yaml "$SERVER":/srv/melrater/
 
 echo "==> 5/6 restart and record what is running"
 ssh "$SERVER" "set -euo pipefail

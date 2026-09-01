@@ -101,7 +101,7 @@ See [contributing.md](contributing.md) for layout and conventions. The database 
 
 One container, SQLite, two bind mounts. The image both serves the app and runs management commands; everything durable lives on the host.
 
-The stack's two config files — `compose.yaml` and `Caddyfile` — live in [`deploy/`](deploy/) in this repo and are copied to the server by [`deploy/deploy.sh`](deploy/deploy.sh). Edit them here, never on the box.
+The stack's one config file — `compose.yaml` — lives in [`deploy/`](deploy/) in this repo and is copied to the server by [`deploy/deploy.sh`](deploy/deploy.sh). Edit it here, never on the box. TLS termination and routing live in the shared `proxy` repo (deployed at `/srv/proxy`), whose caddy owns ports 80/443 and routes this app at the site root — and dirt under `/dirt/` — over the external `proxy` docker network.
 
 ### What is durable, and where
 
@@ -111,8 +111,8 @@ The stack's two config files — `compose.yaml` and `Caddyfile` — live in [`de
 | --------------------------- | ------------- | -------------------------------------------- | ------------- |
 | `db/`                       | `/app/db`     | `db.sqlite3` + its `-wal`/`-shm` sidecars     | never touched |
 | `media/`                    | `/app/media`  | montages, `runs/<uuid>/<digest>/*.avif`       | never touched |
-| `backups/`, `caddy/`        | —             | nightly dumps; Caddy's certificates           | never touched |
-| `compose.yaml`, `Caddyfile` | —             | rsynced from `deploy/`                        | overwritten   |
+| `backups/`                  | —             | nightly dumps                                 | never touched |
+| `compose.yaml`              | —             | rsynced from `deploy/`                        | overwritten   |
 | `.env`                      | —             | written on the box, `chmod 600`               | never touched |
 
 Everything else (the pixi environment, `src/`, the collected static files) is baked into the image and replaced wholesale on redeploy.
@@ -196,16 +196,16 @@ A few other helpful tools include `sqlite3`, `btop`, `curl`, `rsync`.
 The container runs as uid/gid 57439 (`mambauser`), and that account does not exist here, so chown by number — WAL creates its sidecars in the directory, so the directory itself must be writable, not just the database file:
 
 ```bash
-mkdir -p /srv/melrater/{db,media,backups,caddy/data,caddy/config}
+mkdir -p /srv/melrater/{db,media,backups}
 chown -R 57439:57439 /srv/melrater/db /srv/melrater/media /srv/melrater/backups
 chmod 750 /srv/melrater /srv/melrater/{db,media,backups}
 ```
 
-`backups` needs the same 750 as the rest: the nightly job below writes a complete copy of the database into it. Leave `caddy/` root-owned: that image runs as root.
+`backups` needs the same 750 as the rest: the nightly job below writes a complete copy of the database into it. (Caddy's certificate state lives under `/srv/proxy`, owned by the proxy repo.)
 
 #### The `.env` file [server]
 
-This is the one file created on the box and never overwritten. [`deploy/env.example`](deploy/env.example) documents the two variables but never ships — the box only ever receives `compose.yaml` and `Caddyfile` — so write it directly. Both values are generated rather than typed, the address off the cloud metadata service, which is the box's own answer to what its public address is:
+This is the one file created on the box and never overwritten. [`deploy/env.example`](deploy/env.example) documents the two variables but never ships — the box only ever receives `compose.yaml` — so write it directly. Both values are generated rather than typed, the address off the cloud metadata service, which is the box's own answer to what its public address is:
 
 ```bash
 HOST=$(curl -fsS http://169.254.169.254/hetzner/v1/metadata/public-ipv4)
@@ -220,21 +220,22 @@ grep MELRATER_HOST /srv/melrater/.env    # must match the console exactly
 
 Again, keep that key stable. Regenerating it invalidates every session and logs everyone out.
 
-That leaves the address hand-typed in exactly one place: `HostName` in `~/.ssh/config` — how this laptop reaches the box. Everything else derives: every `ssh` and `rsync` goes through the `hetzner` alias, and `compose.yaml` and the `Caddyfile` both read this file. That is why the Primary IP is worth keeping — a new address is that one line plus `ssh-keygen -R`, and nothing else. The `grep` above is worth the second it costs: `${VAR:?}` catches an unset variable, never a wrong one, and a wrong one fails four silent ways.
+That leaves the address hand-typed in exactly one place: `HostName` in `~/.ssh/config` — how this laptop reaches the box. Everything else derives: every `ssh` and `rsync` goes through the `hetzner` alias, and `compose.yaml` reads this file (the proxy stack keeps the same address in its own `/srv/proxy/.env`). That is why the Primary IP is worth keeping — a new address is that one line plus `ssh-keygen -R`, and nothing else. The `grep` above is worth the second it costs: `${VAR:?}` catches an unset variable, never a wrong one, and a wrong one fails four silent ways.
 
 ### Version-control the deployment [laptop]
 
 ```
 deploy/
-  compose.yaml     the stack: app + caddy, limits, healthcheck, mount paths
-  Caddyfile        TLS on the bare IP
+  compose.yaml     the stack: the app, its limits, healthcheck, mount paths
   env.example      template; the filled-in .env never leaves the box
   deploy.sh        build → smoke-test → push → rsync config → restart → verify
+
+(TLS on the bare IP — the Caddyfile — lives in the proxy repo.)
 ```
 
-They encode six facts that must agree with each other and with `settings.py` — `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `default_sni`, the Caddy site address, the `reverse_proxy melrater:8000` service name, and the bind-mount paths the entrypoint enforces. Every disagreement fails quietly: a 400 on every request, a 403 on every POST, or a TLS handshake that dies while the log reports `certificate obtained successfully`. Hand-typed files that exist in exactly one place with no diff history are the wrong home for that.
+They encode the facts that must agree with each other and with `settings.py` — `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, and the bind-mount paths the entrypoint enforces — while the proxy repo holds the other half: `default_sni`, the site address, and the `reverse_proxy melrater:8000` service name this compose project provides on the shared network. Every disagreement fails quietly: a 400 on every request, a 403 on every POST, or a TLS handshake that dies while the log reports `certificate obtained successfully`. Hand-typed files that exist in exactly one place with no diff history are the wrong home for that.
 
-They reach the server by `rsync` of two named files, not `git clone`. Cloning the repo onto the box would drag `src/`, `tests/` and `pixi.lock` along with it and invite someone to run `docker build` there. The server therefore needs no git, no credentials, and no build context; it holds a finished image, two config files, and the data.
+They reach the server by `rsync` of one named file, not `git clone`. Cloning the repo onto the box would drag `src/`, `tests/` and `pixi.lock` along with it and invite someone to run `docker build` there. The server therefore needs no git, no credentials, and no build context; it holds a finished image, the config files, and the data.
 
 ### Build and ship [laptop]
 
@@ -245,7 +246,7 @@ They reach the server by `rsync` of two named files, not `git clone`. Cloning th
 The healthcheck loads `/accounts/login/`, which resolves the URLconf, which is what imports bidslake, on the box's real amd64 CPU. The script's own last line will still say `(health: starting)`: the first probe does not run until 30 s in. Watch the certificate arrive while you wait:
 
 ```bash
-ssh hetzner 'cd /srv/melrater && docker compose logs -f caddy'
+ssh hetzner 'cd /srv/proxy && docker compose logs -f caddy'
 ```
 
 `certificate obtained successfully`, then `https://<host>/` should redirect to `/accounts/login/` — there is nobody to log in as until the next step creates an account. A browser certificate warning means Caddy has not got one yet; read the log rather than clicking through, since a warning here means the connection is genuinely unprotected. `MELRATER_CSRF_TRUSTED_ORIGINS` and `MELRATER_BEHIND_TLS_PROXY` are what keep every POST from 403ing once there is someone to post: behind a TLS terminator Django sees plain http and rejects the browser's https `Origin` unless told otherwise. `compose.yaml` explains, next to the `no ports` line it depends on, why trusting `X-Forwarded-Proto` is safe here.
@@ -289,16 +290,16 @@ docker compose run --rm melrater python -m django axes_reset_username alice
 ./deploy/deploy.sh
 ```
 
-The same command as [Build and ship](#build-and-ship-laptop), minus the one-time preflight. It writes `/srv/melrater/DEPLOYED` with the config commit and the image ID. Data is never in its path: only `compose.yaml` and the `Caddyfile` are overwritten.
+The same command as [Build and ship](#build-and-ship-laptop), minus the one-time preflight. It writes `/srv/melrater/DEPLOYED` with the config commit and the image ID. Data is never in its path: only `compose.yaml` is overwritten.
 
 ### Sharp edges
 
 - **Never `scp` the SQLite file directly**, and never delete a `db.sqlite3-wal` that belongs to the `db.sqlite3` still sitting beside it — a non-empty one holds committed rows; `VACUUM INTO` folds them in. If you ever do replace that database, the sidecars left beside it must be deleted first: a `-wal` has no tie to a particular file, so SQLite replays the old database's pages into the new one, and `integrity_check` still says `ok`.
-- **Never `rsync --delete` into `/srv/melrater`.** `db/`, `media/`, `backups/` and `caddy/data` share that directory with the two managed files. Sync the two files by name, as `deploy.sh` does.
-- **Two substitution syntaxes read the same `.env`.** compose expands `${MELRATER_HOST}`; the `Caddyfile` uses `{$MELRATER_HOST}`, expanded by Caddy's own adapter from the caddy container's environment — different mechanisms, which is why a changed host needs `up -d` and not `reload`.
+- **Never `rsync --delete` into `/srv/melrater`.** `db/`, `media/` and `backups/` share that directory with the managed file. Sync it by name, as `deploy.sh` does.
+- **Two substitution syntaxes read the boxes' `.env` files.** compose expands `${MELRATER_HOST}`; the proxy repo's `Caddyfile` uses `{$PROXY_HOST}`, expanded by Caddy's own adapter from that container's environment — different mechanisms, which is why a changed host needs `up -d` and not `reload`.
 - **Ownership drift** is the most common failure and the most misleading: reads succeed, the site looks fine, and the first rating fails because SQLite cannot create `-shm` in a directory it does not own. `chown -R 57439:57439` after every sync. The entrypoint checks this at startup and refuses to run.
 - **`python -m django dbshell` fails in the container**: the environment locks `libsqlite`, not the `sqlite3` CLI. Use `python -m django shell`, or the host's `sqlite3` against the bind mount.
 - **`MELRATER_ALLOWED_HOSTS` is split on `,` with no trimming.** A space makes a host named `" 127.0.0.1"`, and every request 400s. This is why `compose.yaml` writes `${MELRATER_HOST},127.0.0.1` closed up.
 - **`MELRATER_DEBUG` defaults to off**, and `compose.yaml` sets it to `0` anyway. The one thing that turns it on is `MELRATER_DEV=1`, which pixi's `[activation.env]` sets for a source checkout and which cannot reach this image — pixi is not installed on it.
-- **`default_sni` is mandatory for IP hosting.** Omit it and Caddy logs `certificate obtained successfully` while every browser fails the handshake — the log looks healthy, so this reads as a browser or firewall problem when it is neither. `openssl s_client -connect IP:443` (no `-servername`) reproduces it; adding `-servername IP` makes it pass, which is the tell.
-- **A rebuild re-issues the certificate even on the same IP**, because `caddy/data` dies with the disk. Let's Encrypt meters certificates per exact identifier per week, and an IPv4 address counts as its own registered domain; routine renewals are coordinated and exempt, but every start from an empty `caddy/data` is a fresh order that counts. Ordinary redeploys are free; a rebuild loop inside one week is not. Carrying `/srv/melrater/caddy/data` across a rebuild avoids it — move it as root, it holds the ACME account key, and do not chown it to 57439.
+- **`default_sni` is mandatory for IP hosting** (set in the proxy repo's `Caddyfile`). Omit it and Caddy logs `certificate obtained successfully` while every browser fails the handshake — the log looks healthy, so this reads as a browser or firewall problem when it is neither. `openssl s_client -connect IP:443` (no `-servername`) reproduces it; adding `-servername IP` makes it pass, which is the tell.
+- **A rebuild re-issues the certificate even on the same IP**, because `caddy/data` dies with the disk. Let's Encrypt meters certificates per exact identifier per week, and an IPv4 address counts as its own registered domain; routine renewals are coordinated and exempt, but every start from an empty `caddy/data` is a fresh order that counts. Ordinary redeploys are free; a rebuild loop inside one week is not. Carrying `/srv/proxy/caddy/data` across a rebuild avoids it — move it as root, it holds the ACME account key, and do not chown it to 57439.
