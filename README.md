@@ -187,7 +187,7 @@ Skip it and the next step's `apt-get update` is the first thing to fail — foll
 
 #### Docker and tooling [server]
 
-[Follow the `apt` instructions](https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository).
+The proxy repo's `bootstrap.sh` does this step and the next two (Docker, the `/srv` directories, the `.env` secret, the shared network) in one idempotent run from the laptop; the rest of this section records what it does, by hand. [Follow the `apt` instructions](https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository).
 
 A few other helpful tools include `sqlite3`, `btop`, `curl`, `rsync`.
 
