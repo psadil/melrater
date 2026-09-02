@@ -2,8 +2,10 @@
 # Deploy melrater. Runs from the LAPTOP, not the server — the image cannot be
 # built on the box (the build compiles bidslake, a Rust extension bundling
 # DuckDB's C++; see "Build and ship" in the README), so the whole sequence
-# starts here and the server only ever receives a finished image and two config
-# files.
+# starts here and the server only ever receives a finished image and one config
+# file. TLS and routing live in the shared proxy stack (the `proxy` repo),
+# which also installs /usr/local/bin/vm-host, which this script calls for the
+# box's public address — so deploy the proxy first.
 #
 #   ./deploy/deploy.sh
 #

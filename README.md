@@ -253,6 +253,7 @@ The stack has been running since the deploy, against a database the entrypoint m
 
 ```bash
 # [server] one reviewer account per person; each password is printed once
+export MELRATER_HOST=$(vm-host)   # compose interpolates it; the deploy normally supplies it
 docker compose run --rm melrater python -m django create_rater alice
 # ...and one account for the laptop to push as
 docker compose run --rm melrater python -m django create_rater laptop --ingest
@@ -292,7 +293,7 @@ The same command as [Build and ship](#build-and-ship-laptop), minus the one-time
 
 - **Never `scp` the SQLite file directly**, and never delete a `db.sqlite3-wal` that belongs to the `db.sqlite3` still sitting beside it — a non-empty one holds committed rows; `VACUUM INTO` folds them in. If you ever do replace that database, the sidecars left beside it must be deleted first: a `-wal` has no tie to a particular file, so SQLite replays the old database's pages into the new one, and `integrity_check` still says `ok`.
 - **Never `rsync --delete` into `/srv/melrater`.** `db/`, `media/` and `backups/` share that directory with the managed file. Sync it by name, as `deploy.sh` does.
-- **Two substitution syntaxes read the boxes' `.env` files.** compose expands `${MELRATER_HOST}` (exported by deploy.sh, not stored); the proxy repo's `Caddyfile` uses `{$PROXY_HOST}`, expanded by Caddy's own adapter from that container's environment — different mechanisms, which is why a changed host needs `up -d` and not `reload`.
+- **Two substitution syntaxes, neither reading this stack's `.env`.** compose expands `${MELRATER_HOST}` from the environment `deploy.sh` exports (nothing stores it); the proxy repo's `Caddyfile` uses `{$PROXY_HOST}`, expanded by Caddy's own adapter from that container's environment — different mechanisms, which is why a changed host needs `up -d` and not `reload`. A hand-run `docker compose` on the box therefore needs `export MELRATER_HOST=$(vm-host)` first, and says so when it does not have it.
 - **Ownership drift** is the most common failure and the most misleading: reads succeed, the site looks fine, and the first rating fails because SQLite cannot create `-shm` in a directory it does not own. `chown -R 57439:57439` after every sync. The entrypoint checks this at startup and refuses to run.
 - **`python -m django dbshell` fails in the container**: the environment locks `libsqlite`, not the `sqlite3` CLI. Use `python -m django shell`, or the host's `sqlite3` against the bind mount.
 - **`MELRATER_ALLOWED_HOSTS` is split on `,` with no trimming.** A space makes a host named `" 127.0.0.1"`, and every request 400s. This is why `compose.yaml` writes `${MELRATER_HOST},127.0.0.1` closed up.
