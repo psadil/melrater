@@ -61,7 +61,7 @@ Ingest needs the raw NIfTIs and the catalog, so it happens locally. Once reviewe
 JSON and its montages as a tar:
 
 ```sh
-pixi run manage push_runs 301 302 --server https://<host> --user <ingest account>
+pixi run manage push_runs 301 302 --server "https://$(ssh hetzner vm-host)" --user <ingest account>
 ```
 
 It prompts for the password unless `MELRATER_PUSH_PASSWORD` is set, so the credential need not live in a file. Bad push passwords go through django-axes (subject to lock-out after too many failed attempts).
@@ -71,7 +71,7 @@ A run is ~288 montages and a couple of megabytes of JSON. A few hundred runs is 
 Ingesting and pushing can be one step:
 
 ```sh
-pixi run manage import_run study.duckdb --push https://<host> --user <ingest account>
+pixi run manage import_run study.duckdb --push "https://$(ssh hetzner vm-host)" --user <ingest account>
 ```
 
 A failed push there is reported separately from a failed ingest: the runs are still on the laptop, and `push_runs` will pick them up. `--dry-run` reports what would be sent; `--new` sends only runs the server has never seen; `--force` re-sends regardless. A run that fails is reported and the batch carries on, with a non-zero exit at the end.
@@ -205,22 +205,18 @@ chmod 750 /srv/melrater /srv/melrater/{db,media,backups}
 
 #### The `.env` file [server]
 
-This is the one file created on the box and never overwritten. [`deploy/env.example`](deploy/env.example) documents the two variables but never ships — the box only ever receives `compose.yaml` — so write it directly. Both values are generated rather than typed, the address off the cloud metadata service, which is the box's own answer to what its public address is:
+This is the one file created on the box and never overwritten. [`deploy/env.example`](deploy/env.example) documents it but never ships — the box only ever receives `compose.yaml` — so write it directly. It holds one generated value:
 
 ```bash
-HOST=$(curl -fsS http://169.254.169.254/hetzner/v1/metadata/public-ipv4)
-: "${HOST:?no address from the metadata service — read it off the console}"
-cat > /srv/melrater/.env <<EOF
-MELRATER_SECRET_KEY=$(openssl rand -base64 48)
-MELRATER_HOST=$HOST
-EOF
-chmod 600 /srv/melrater/.env
-grep MELRATER_HOST /srv/melrater/.env    # must match the console exactly
+umask 077
+printf 'MELRATER_SECRET_KEY=%s\n' "$(openssl rand -base64 48)" > /srv/melrater/.env
 ```
 
-Again, keep that key stable. Regenerating it invalidates every session and logs everyone out.
+Keep that key stable. Regenerating it invalidates every session and logs everyone out.
 
-That leaves the address hand-typed in exactly one place: `HostName` in `~/.ssh/config` — how this laptop reaches the box. Everything else derives: every `ssh` and `rsync` goes through the `hetzner` alias, and `compose.yaml` reads this file (the proxy stack keeps the same address in its own `/srv/proxy/.env`). That is why the Primary IP is worth keeping — a new address is that one line plus `ssh-keygen -R`, and nothing else. The `grep` above is worth the second it costs: `${VAR:?}` catches an unset variable, never a wrong one, and a wrong one fails four silent ways.
+The public address is **not** in this file. `deploy.sh` exports `MELRATER_HOST` from `vm-host` — the box's own answer for its public address, installed to `/usr/local/bin` by the proxy repo, which is already a prerequisite for this app being routed at all. That matters because a stale address here is the quietest failure on the box: `ALLOWED_HOSTS` 400s every request and `CSRF_TRUSTED_ORIGINS` 403s every POST, while the healthcheck keeps reporting healthy because it dials `127.0.0.1`. `${VAR:?}` catches an unset variable, never a wrong one.
+
+That leaves the address hand-typed in exactly one place: `HostName` in `~/.ssh/config` — how this laptop reaches the box. That is why the Primary IP is worth keeping: a new address is that one line plus `ssh-keygen -R`, and every deploy re-derives the rest. (The proxy's deploy refuses to run when the two disagree.)
 
 ### Version-control the deployment [laptop]
 
@@ -269,7 +265,7 @@ Then push everything from the laptop, as [Push runs to the deployment](#push-run
 ```bash
 # [laptop]
 cd ~/git/neuro/melrater
-pixi run manage push_runs --server https://<host> --user laptop
+pixi run manage push_runs --server "https://$(ssh hetzner vm-host)" --user laptop
 ```
 
 The montages are subject-derived. That should inform where this box lives and who can reach it.
@@ -296,7 +292,7 @@ The same command as [Build and ship](#build-and-ship-laptop), minus the one-time
 
 - **Never `scp` the SQLite file directly**, and never delete a `db.sqlite3-wal` that belongs to the `db.sqlite3` still sitting beside it — a non-empty one holds committed rows; `VACUUM INTO` folds them in. If you ever do replace that database, the sidecars left beside it must be deleted first: a `-wal` has no tie to a particular file, so SQLite replays the old database's pages into the new one, and `integrity_check` still says `ok`.
 - **Never `rsync --delete` into `/srv/melrater`.** `db/`, `media/` and `backups/` share that directory with the managed file. Sync it by name, as `deploy.sh` does.
-- **Two substitution syntaxes read the boxes' `.env` files.** compose expands `${MELRATER_HOST}`; the proxy repo's `Caddyfile` uses `{$PROXY_HOST}`, expanded by Caddy's own adapter from that container's environment — different mechanisms, which is why a changed host needs `up -d` and not `reload`.
+- **Two substitution syntaxes read the boxes' `.env` files.** compose expands `${MELRATER_HOST}` (exported by deploy.sh, not stored); the proxy repo's `Caddyfile` uses `{$PROXY_HOST}`, expanded by Caddy's own adapter from that container's environment — different mechanisms, which is why a changed host needs `up -d` and not `reload`.
 - **Ownership drift** is the most common failure and the most misleading: reads succeed, the site looks fine, and the first rating fails because SQLite cannot create `-shm` in a directory it does not own. `chown -R 57439:57439` after every sync. The entrypoint checks this at startup and refuses to run.
 - **`python -m django dbshell` fails in the container**: the environment locks `libsqlite`, not the `sqlite3` CLI. Use `python -m django shell`, or the host's `sqlite3` against the bind mount.
 - **`MELRATER_ALLOWED_HOSTS` is split on `,` with no trimming.** A space makes a host named `" 127.0.0.1"`, and every request 400s. This is why `compose.yaml` writes `${MELRATER_HOST},127.0.0.1` closed up.

@@ -54,6 +54,12 @@ echo "==> 5/6 restart and record what is running"
 ssh "$SERVER" "set -euo pipefail
 	cd /srv/melrater
 	export MELRATER_TAG='$TAG'   # or compose deploys its default, not what we built
+	# The box's own answer for its public address (installed by the proxy
+	# repo's deploy, which is already a prerequisite for being routed at all).
+	# A plain assignment, then export: the export builtin reports its OWN
+	# status, so it would mask a failed discovery and export an empty value.
+	MELRATER_HOST=\$(vm-host)
+	export MELRATER_HOST
 	docker compose pull
 	docker compose up -d
 	docker image prune -f
