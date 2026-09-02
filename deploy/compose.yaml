@@ -21,9 +21,10 @@ services:
     image: ${MELRATER_TAG:-psadil/melrater:latest}
     restart: unless-stopped
     networks: [proxy]
-    # no ports: only the proxy's caddy touches the host network stack, which
-    # is also what makes MELRATER_BEHIND_TLS_PROXY safe — nothing but the
-    # proxy can set X-Forwarded-Proto if the app is unreachable any other way.
+    # no ports: only the proxy's caddy touches the host network stack, so
+    # nothing OUTSIDE the box can set X-Forwarded-Proto — which is what makes
+    # MELRATER_BEHIND_TLS_PROXY safe. (Co-tenant app containers on the shared
+    # proxy network could reach :8000 directly; they are equally trusted.)
     environment:
       MELRATER_DEBUG: "0"
       MELRATER_SECRET_KEY: ${MELRATER_SECRET_KEY:?set it in /srv/melrater/.env}
