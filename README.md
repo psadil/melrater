@@ -61,8 +61,10 @@ Ingest needs the raw NIfTIs and the catalog, so it happens locally. Once reviewe
 JSON and its montages as a tar:
 
 ```sh
-pixi run manage push_runs 301 302 --server "https://$(ssh hetzner vm-host)" --user <ingest account>
+pixi run manage push_runs 301 302 --server "https://$(ssh hetzner vm-host)/melrater" --user <ingest account>
 ```
+
+The `/melrater` is the path prefix the deployment is served under (see [Deploying](#deploying)); `--server` is joined with `/api/v1/runs`, so leaving it off posts to the edge's 404 rather than to the app.
 
 It prompts for the password unless `MELRATER_PUSH_PASSWORD` is set, so the credential need not live in a file. Bad push passwords go through django-axes (subject to lock-out after too many failed attempts).
 
@@ -71,7 +73,7 @@ A run is ~288 montages and a couple of megabytes of JSON. A few hundred runs is 
 Ingesting and pushing can be one step:
 
 ```sh
-pixi run manage import_run study.duckdb --push "https://$(ssh hetzner vm-host)" --user <ingest account>
+pixi run manage import_run study.duckdb --push "https://$(ssh hetzner vm-host)/melrater" --user <ingest account>
 ```
 
 A failed push there is reported separately from a failed ingest: the runs are still on the laptop, and `push_runs` will pick them up. `--dry-run` reports what would be sent; `--new` sends only runs the server has never seen; `--force` re-sends regardless. A run that fails is reported and the batch carries on, with a non-zero exit at the end.
@@ -101,7 +103,15 @@ See [contributing.md](contributing.md) for layout and conventions. The database 
 
 One container, SQLite, two bind mounts. The image both serves the app and runs management commands; everything durable lives on the host.
 
-The stack's one config file — `compose.yaml` — lives in [`deploy/`](deploy/) in this repo and is copied to the server by [`deploy/deploy.sh`](deploy/deploy.sh). Edit it here, never on the box. TLS termination and routing live in the shared `proxy` repo (deployed at `/srv/proxy`), whose caddy owns ports 80/443 and routes this app at the site root — and dirt under `/dirt/` — over the external `proxy` docker network.
+The stack's one config file — `compose.yaml` — lives in [`deploy/`](deploy/) in this repo and is copied to the server by [`deploy/deploy.sh`](deploy/deploy.sh). Edit it here, never on the box. TLS termination and routing live in the shared `proxy` repo (deployed at `/srv/proxy`), whose caddy owns ports 80/443 and routes this app under `/melrater/` — and dirt under `/dirt/` — over the external `proxy` docker network.
+
+### The `/melrater` prefix
+
+The box is addressed by its bare IP, so there is exactly one TLS site and every app on it needs a path of its own. Reviewers go to `https://<host>/melrater/`; the site root serves nothing.
+
+`compose.yaml` sets `MELRATER_FORCE_SCRIPT_NAME=/melrater`, which is the whole app-side change: Django strips the prefix for routing and prepends it to every URL it generates, so `{% url %}`, `{% static %}` and the montage URLs all come out under it. The proxy forwards `/melrater/...` **unstripped** — Django needs the prefix intact, since a proxy-side strip would leak into redirects and `next=` parameters — with one exception, `/melrater/static/*`, which is rewritten onto granian's `/static` route. That prefix is written in two repos and nothing checks that they agree: change it here and in the proxy's `Caddyfile` together.
+
+Unprefixed paths still resolve, which is deliberate — the container healthcheck dials `/accounts/login/` on `127.0.0.1` directly, and nothing outside the box can reach the app that way. Local development is unaffected: the variable is unset, so `pixi run serve` still serves at the root.
 
 ### What is durable, and where
 
@@ -229,7 +239,7 @@ deploy/
 (TLS on the bare IP — the Caddyfile — lives in the proxy repo.)
 ```
 
-They encode the facts that must agree with each other and with `settings.py` — `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, and the bind-mount paths the entrypoint enforces — while the proxy repo holds the other half: `default_sni`, the site address, and the `reverse_proxy melrater:8000` service name this compose project provides on the shared network. Every disagreement fails quietly: a 400 on every request, a 403 on every POST, or a TLS handshake that dies while the log reports `certificate obtained successfully`. Hand-typed files that exist in exactly one place with no diff history are the wrong home for that.
+They encode the facts that must agree with each other and with `settings.py` — `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, and the bind-mount paths the entrypoint enforces — while the proxy repo holds the other half: `default_sni`, the site address, the `/melrater` path it routes on, and the `reverse_proxy melrater:8000` service name this compose project provides on the shared network. Every disagreement fails quietly: a 400 on every request, a 403 on every POST, or a TLS handshake that dies while the log reports `certificate obtained successfully`. Hand-typed files that exist in exactly one place with no diff history are the wrong home for that.
 
 They reach the server by `rsync` of one named file, not `git clone`. Cloning the repo onto the box would drag `src/`, `tests/` and `pixi.lock` along with it and invite someone to run `docker build` there. The server therefore needs no git, no credentials, and no build context; it holds a finished image, the config files, and the data.
 
@@ -239,13 +249,13 @@ They reach the server by `rsync` of one named file, not `git clone`. Cloning the
 ./deploy/deploy.sh
 ```
 
-The healthcheck loads `/accounts/login/`, which resolves the URLconf, which is what imports bidslake, on the box's real amd64 CPU. The script's own last line will still say `(health: starting)`: the first probe does not run until 30 s in. Watch the certificate arrive while you wait:
+The healthcheck loads `/accounts/login/` — unprefixed, straight at the container on `127.0.0.1` — which resolves the URLconf, which is what imports bidslake, on the box's real amd64 CPU. The script's own last line will still say `(health: starting)`: the first probe does not run until 30 s in. Watch the certificate arrive while you wait:
 
 ```bash
 ssh hetzner 'cd /srv/proxy && docker compose logs -f caddy'
 ```
 
-`certificate obtained successfully`, then `https://<host>/` should redirect to `/accounts/login/` — there is nobody to log in as until the next step creates an account. A browser certificate warning means Caddy has not got one yet; read the log rather than clicking through, since a warning here means the connection is genuinely unprotected. `MELRATER_CSRF_TRUSTED_ORIGINS` and `MELRATER_BEHIND_TLS_PROXY` are what keep every POST from 403ing once there is someone to post: behind a TLS terminator Django sees plain http and rejects the browser's https `Origin` unless told otherwise. `compose.yaml` explains, next to the `no ports` line it depends on, why trusting `X-Forwarded-Proto` is safe here.
+`certificate obtained successfully`, then `https://<host>/melrater/` should redirect to `/melrater/accounts/login/` — there is nobody to log in as until the next step creates an account. (A redirect that lands on `/accounts/login/`, prefixless, means `MELRATER_FORCE_SCRIPT_NAME` did not reach the container; `https://<host>/` is a 404 from the edge and always will be.) A browser certificate warning means Caddy has not got one yet; read the log rather than clicking through, since a warning here means the connection is genuinely unprotected. `MELRATER_CSRF_TRUSTED_ORIGINS` and `MELRATER_BEHIND_TLS_PROXY` are what keep every POST from 403ing once there is someone to post: behind a TLS terminator Django sees plain http and rejects the browser's https `Origin` unless told otherwise. `compose.yaml` explains, next to the `no ports` line it depends on, why trusting `X-Forwarded-Proto` is safe here.
 
 ### Create the accounts and push the runs
 
@@ -266,7 +276,7 @@ Then push everything from the laptop, as [Push runs to the deployment](#push-run
 ```bash
 # [laptop]
 cd ~/git/neuro/melrater
-pixi run manage push_runs --server "https://$(ssh hetzner vm-host)" --user laptop
+pixi run manage push_runs --server "https://$(ssh hetzner vm-host)/melrater" --user laptop
 ```
 
 The montages are subject-derived. That should inform where this box lives and who can reach it.
@@ -297,6 +307,7 @@ The same command as [Build and ship](#build-and-ship-laptop), minus the one-time
 - **Ownership drift** is the most common failure and the most misleading: reads succeed, the site looks fine, and the first rating fails because SQLite cannot create `-shm` in a directory it does not own. `chown -R 57439:57439` after every sync. The entrypoint checks this at startup and refuses to run.
 - **`python -m django dbshell` fails in the container**: the environment locks `libsqlite`, not the `sqlite3` CLI. Use `python -m django shell`, or the host's `sqlite3` against the bind mount.
 - **`MELRATER_ALLOWED_HOSTS` is split on `,` with no trimming.** A space makes a host named `" 127.0.0.1"`, and every request 400s. This is why `compose.yaml` writes `${MELRATER_HOST},127.0.0.1` closed up.
+- **`MELRATER_FORCE_SCRIPT_NAME` and the proxy's `/melrater` route have to say the same thing**, and they live in different repos with nothing checking them against each other. Set only in the app and the edge never routes there: a 404 from Caddy. Set only in the edge and every generated URL comes out unprefixed: the login page renders, its CSS 404s, and submitting it redirects to `/` — which is now the edge's 404. The tell for the second one is a redirect to `/accounts/login/` rather than to `/melrater/accounts/login/`.
 - **`MELRATER_DEBUG` defaults to off**, and `compose.yaml` sets it to `0` anyway. The one thing that turns it on is `MELRATER_DEV=1`, which pixi's `[activation.env]` sets for a source checkout and which cannot reach this image — pixi is not installed on it.
 - **`default_sni` is mandatory for IP hosting** (set in the proxy repo's `Caddyfile`). Omit it and Caddy logs `certificate obtained successfully` while every browser fails the handshake — the log looks healthy, so this reads as a browser or firewall problem when it is neither. `openssl s_client -connect IP:443` (no `-servername`) reproduces it; adding `-servername IP` makes it pass, which is the tell.
 - **A rebuild re-issues the certificate even on the same IP**, because `caddy/data` dies with the disk. Let's Encrypt meters certificates per exact identifier per week, and an IPv4 address counts as its own registered domain; routine renewals are coordinated and exempt, but every start from an empty `caddy/data` is a fresh order that counts. Ordinary redeploys are free; a rebuild loop inside one week is not. Carrying `/srv/proxy/caddy/data` across a rebuild avoids it — move it as root, it holds the ACME account key, and do not chown it to 57439.

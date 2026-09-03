@@ -225,8 +225,24 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-# leading slash matches granian's --static-path-route (see the serve task)
-STATIC_URL = "/static/"
+# Serving under a path prefix (https://<host>/melrater/). The proxy forwards
+# the prefixed path through UNstripped: Django strips it for routing and
+# prepends it to every generated URL. (Under ASGI request.path comes straight
+# from the scope, so a proxy-side strip would leak into redirects and `next=`
+# parameters.) Unset means "at the site root" — which is what `pixi run serve`
+# and the container healthcheck, which dials 127.0.0.1 prefixless, both use.
+# `or None` because Django's two handlers disagree about an empty string: WSGI
+# treats it as a forced (empty) script name and ASGI as "not set". None is the
+# one value both read as "no prefix", so an empty variable normalizes to it.
+FORCE_SCRIPT_NAME = env.str("MELRATER_FORCE_SCRIPT_NAME", default="") or None
+
+# Relative on purpose, exactly like MEDIA_URL below: `settings.STATIC_URL` is a
+# property that prepends the script prefix, so this resolves root-anchored —
+# "/static/..." at the root, "/melrater/static/..." under a prefix — and never
+# relative to the current page. The leading segment still matches granian's
+# --static-path-route (see the serve task), because the proxy strips the prefix
+# for static requests only.
+STATIC_URL = "static/"
 STATICFILES_DIRS = [SRC_DIR / "static"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
@@ -240,7 +256,8 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 # that prepends the script prefix, and a storage backend configured with an
 # explicit base_url would capture the bare "media/" literal instead — the
 # difference between /media/runs/... and a relative URL that resolves under
-# /runs/<id>/ic/<n>/ and 404s.
+# /runs/<id>/ic/<n>/ and 404s. The same property is what serves the montages at
+# /melrater/media/... once FORCE_SCRIPT_NAME is set.
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 

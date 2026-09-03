@@ -4,7 +4,9 @@
 # TLS termination and routing live in the shared `proxy` stack (its own repo,
 # at /srv/proxy on the box): this stack publishes no ports and joins the
 # external `proxy` docker network the edge routes over (created once with
-# `docker network create proxy`). MELRATER_HOST is not configured anywhere:
+# `docker network create proxy`). The edge routes this app under /melrater/,
+# alongside dirt under /dirt/, so the two agree on one prefix each — see
+# MELRATER_FORCE_SCRIPT_NAME below. MELRATER_HOST is not configured anywhere:
 # the deploy exports it from `vm-host`, the box's own answer for its public
 # address, so it cannot drift from the proxy's PROXY_HOST — a wrong
 # ALLOWED_HOSTS 400s every request and a wrong CSRF_TRUSTED_ORIGINS 403s every
@@ -32,8 +34,17 @@ services:
       # keep 127.0.0.1 so the healthcheck is not a DisallowedHost. No spaces
       # after the comma — the setting is split on "," with no trimming.
       MELRATER_ALLOWED_HOSTS: ${MELRATER_HOST:?deploy.sh exports it; by hand, export MELRATER_HOST from vm-host},127.0.0.1
+      # scheme://host only — an origin has no path, so the prefix below has
+      # no business here
       MELRATER_CSRF_TRUSTED_ORIGINS: https://${MELRATER_HOST}
       MELRATER_BEHIND_TLS_PROXY: "1"
+      # The proxy forwards /melrater/... unstripped; Django strips it for
+      # routing and prefixes every generated URL (FORCE_SCRIPT_NAME in
+      # settings.py). Must match the prefix the proxy's Caddyfile routes on —
+      # they are in separate repos and nothing checks that they agree. The
+      # healthcheck below keeps working regardless: an unprefixed path still
+      # resolves.
+      MELRATER_FORCE_SCRIPT_NAME: /melrater
       # Turn on /api/v1/ so `push_runs` can deliver runs (see the README on
       # pushing to a deployment). It is off by default outside a source
       # checkout, so this line is the whole opt-in; with it off the endpoint
