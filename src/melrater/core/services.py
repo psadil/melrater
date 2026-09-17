@@ -111,7 +111,7 @@ def ingest_run(*, source: melodic.MelodicSource, image_workers: int = 0) -> Run:
         anat_to_func_path=source.anat_to_func_path,
         n_components=source.n_components,
         workers=image_workers,
-    ) as (staged, backgrounds):
+    ) as (staged, backgrounds, smoothings, picks):
         digest = montage.digest_directory(staged)
         montage_store.store_directory(run_uuid, digest, staged)
 
@@ -135,6 +135,8 @@ def ingest_run(*, source: melodic.MelodicSource, image_workers: int = 0) -> Run:
                 montage_format=montage_format(),
                 montage_digest=digest,
                 montage_backgrounds=list(backgrounds),
+                montage_smoothings=list(smoothings),
+                montage_picks=picks,
             )
             components = Component.objects.bulk_create(
                 Component(
@@ -166,7 +168,8 @@ def ingest_run(*, source: melodic.MelodicSource, image_workers: int = 0) -> Run:
                 )
     except Exception:
         # the rows are gone, so the montages are unreachable; drop them rather
-        # than leave 20 MB of orphans under a uuid nothing will ever name again
+        # than leave tens of megabytes of orphans under a uuid nothing will
+        # ever name again
         montage_store.delete_run(run_uuid)
         raise
     return run
@@ -194,15 +197,29 @@ def rerender_montages(*, run: Run, image_workers: int = 0) -> None:
         anat_to_func_path=paths.anat_to_func,
         n_components=run.components.count(),
         workers=image_workers,
-    ) as (staged, backgrounds):
+    ) as (staged, backgrounds, smoothings, picks):
         digest = montage.digest_directory(staged)
         montage_store.store_directory(run.uuid, digest, staged)
 
     run.montage_format = montage_format()
     run.montage_digest = digest
     run.montage_backgrounds = list(backgrounds)
-    run.save(update_fields=["montage_format", "montage_digest", "montage_backgrounds"])
+    run.montage_smoothings = list(smoothings)
+    run.montage_picks = picks
+    run.save(update_fields=_MONTAGE_FIELDS)
     montage_store.retain_digest(run.uuid, digest)
+
+
+#: The columns that describe one rendered montage set. They are written
+#: together, always: the smoothing levels and the slice picks are properties of
+#: the *render*, exactly as the backgrounds are, so they travel with the digest.
+_MONTAGE_FIELDS = (
+    "montage_format",
+    "montage_digest",
+    "montage_backgrounds",
+    "montage_smoothings",
+    "montage_picks",
+)
 
 
 def delete_run(*, run: Run) -> None:
@@ -222,18 +239,21 @@ def _staged_render(
     anat_to_func_path: Path | None,
     n_components: int,
     workers: int,
-) -> Iterator[tuple[Path, tuple[str, ...]]]:
+) -> Iterator[tuple[Path, tuple[str, ...], tuple[str, ...], dict[str, list[int]]]]:
     """Render one run's montages into a temporary directory.
 
     A plain directory rather than the storage backend, because the render
     parallelizes over spawned processes and montage.py is deliberately
     Django-free; storage.store_directory ingests the result.
 
-    Yields the directory and the backgrounds that were rendered into it. A run
-    without a registration gets the functional background alone; a registration
-    that is present but unusable raises, and `import_run` reports that run and
-    carries on, as it does for any other bad input. Missing is not the same as
-    broken, and only the first of those is allowed to pass quietly.
+    Yields the directory, the backgrounds and smoothing levels that were
+    rendered into it, and the slice indices each axis shows (which the page
+    draws as labels). A run without a registration gets the functional
+    background alone; a registration that is present but unusable raises, and
+    `import_run` reports that run and carries on, as it does for any other bad
+    input. Missing is not the same as broken, and only the first of those is
+    allowed to pass quietly. Both smoothing levels need nothing but the IC map
+    and the mask, so every run gets both.
     """
     # deferred: resample needs scipy, which is in the `render` pixi feature and
     # deliberately not in the runtime image — the server imports this module
@@ -276,11 +296,19 @@ def _staged_render(
             ic_path,
             list(range(1, n_components + 1)),
             backgrounds,
+            montage.SMOOTHINGS,
             picks_by_axis,
+            mask > 0,
+            montage.canonical_zooms(mean_img),
             staged,
             workers=workers,
         )
-        yield staged, tuple(b.name for b in backgrounds)
+        yield (
+            staged,
+            tuple(b.name for b in backgrounds),
+            montage.SMOOTHINGS,
+            picks_by_axis,
+        )
     finally:
         shutil.rmtree(staged, ignore_errors=True)
 
@@ -301,8 +329,8 @@ def store_pushed_montages(
 
     Every name is rebuilt by `transfer.read_montage_tar`, so nothing the
     sender chose reaches a path. The set is then checked twice over: it must
-    hold exactly one montage per component, background and axis, and its
-    digest — recomputed
+    hold exactly one montage per component, background, smoothing level and
+    axis, and its digest — recomputed
     from the bytes that actually arrived — must be the one the payload
     declared. A truncated upload therefore cannot be committed as a whole run.
     """
@@ -318,12 +346,15 @@ def store_pushed_montages(
             tar,
             n_components=n_components,
             backgrounds=payload.backgrounds,
+            smoothings=payload.smoothings,
             montage_format=payload.montage_format,
             max_member_bytes=settings.INGEST_MAX_MONTAGE_BYTES,
         ):
             montage_store.save(prefix + name, data)
             hashed.append((name, hashlib.sha256(data).digest()))
-        expected = montage.montage_count(n_components, payload.backgrounds)
+        expected = montage.montage_count(
+            n_components, payload.backgrounds, payload.smoothings
+        )
         if len(hashed) != expected:
             raise PushRejected(
                 f"{len(hashed)} montages for {n_components} components, "
@@ -366,6 +397,8 @@ def create_pushed_run(*, payload: RunPayload) -> Run:
             montage_format=payload.montage_format,
             montage_digest=payload.montage_digest,
             montage_backgrounds=list(payload.backgrounds),
+            montage_smoothings=list(payload.smoothings),
+            montage_picks={axis: list(picks) for axis, picks in payload.picks.items()},
         )
         components = Component.objects.bulk_create(
             Component(
@@ -401,9 +434,10 @@ def refresh_pushed_run(*, run: Run, payload: RunPayload) -> Run:
     """Point an already-ingested run at a newly pushed set of montages.
 
     A run that exists is only ever re-rendered, never rewritten: this touches
-    `montage_format`, `montage_digest` and `montage_backgrounds` and nothing
-    else — a re-render is exactly where a run gains or loses its anatomical
-    background, so that list travels with the digest. No Component and
+    the montage columns (`_MONTAGE_FIELDS`) and nothing else — a re-render is
+    exactly where a run gains or loses its anatomical background, so that list
+    travels with the digest, as do the smoothing levels and the slice picks
+    the page labels the montages with. No Component and
     no Classification is reachable from here, which is what bounds what a
     compromised ingest account can do to a run reviewers have already worked
     on — and it matches the only reason to push a run twice, which is that its
@@ -415,7 +449,9 @@ def refresh_pushed_run(*, run: Run, payload: RunPayload) -> Run:
     run.montage_format = payload.montage_format
     run.montage_digest = payload.montage_digest
     run.montage_backgrounds = list(payload.backgrounds)
-    run.save(update_fields=["montage_format", "montage_digest", "montage_backgrounds"])
+    run.montage_smoothings = list(payload.smoothings)
+    run.montage_picks = {axis: list(picks) for axis, picks in payload.picks.items()}
+    run.save(update_fields=_MONTAGE_FIELDS)
     montage_store.retain_digest(run.uuid, payload.montage_digest)
     logger.info("ingest: refreshed %s (%s)", run.label, run.uuid)
     return run
@@ -439,6 +475,16 @@ def check_pushed_run(*, run: Run | None, payload: RunPayload) -> None:
         raise PushRejected(
             f"backgrounds {list(backgrounds)} must be unique and include 'func'"
         )
+    smoothings = payload.smoothings
+    if "raw" not in smoothings or len(set(smoothings)) != len(smoothings):
+        raise PushRejected(
+            f"smoothings {list(smoothings)} must be unique and include 'raw'"
+        )
+    for axis, picks in payload.picks.items():
+        if axis not in montage.AXES:
+            raise PushRejected(f"slice picks for an unknown axis {axis!r}")
+        if not picks or any(i < 0 for i in picks):
+            raise PushRejected(f"slice picks for {axis} must be non-negative indices")
     for fix in payload.fix:
         if len(fix.verdicts) != n_components:
             raise PushRejected(

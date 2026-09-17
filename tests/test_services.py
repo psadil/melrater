@@ -54,20 +54,55 @@ def test_ingest_stores_fix_labels_in_component_order(ingested_run: Run) -> None:
     assert labels == ["Signal", "Noise", "Noise"]
 
 
-def test_ingest_renders_one_montage_per_component_axis(
+def test_ingest_renders_one_montage_per_component_smoothing_and_axis(
     ingested_run: Run, media_root: Path
 ) -> None:
     files = list((montage_dir(media_root, ingested_run)).iterdir())
 
-    assert len(files) == N_COMPONENTS * 3
+    assert len(files) == montage.montage_count(
+        N_COMPONENTS, ("func",), montage.SMOOTHINGS
+    )
 
 
-def test_ingest_montage_names_encode_component_background_and_axis(
+def test_ingest_montage_names_encode_component_background_smoothing_and_axis(
     ingested_run: Run, media_root: Path
 ) -> None:
     files = {p.name for p in (montage_dir(media_root, ingested_run)).iterdir()}
 
-    assert f"ic001_func_axial.{ingested_run.montage_format}" in files
+    assert f"ic001_func_raw_axial.{ingested_run.montage_format}" in files
+
+
+def test_ingest_names_the_smoothed_montages(
+    ingested_run: Run, media_root: Path
+) -> None:
+    files = {p.name for p in (montage_dir(media_root, ingested_run)).iterdir()}
+
+    assert f"ic001_func_smooth_axial.{ingested_run.montage_format}" in files
+
+
+def test_ingest_records_both_smoothing_levels(ingested_run: Run) -> None:
+    # Assert: both need nothing but the IC map and the mask, so every run has both
+    assert ingested_run.montage_smoothings == ["raw", "smooth"]
+
+
+def test_ingest_records_the_slice_picks_per_axis(ingested_run: Run) -> None:
+    # Assert: the page draws the slice labels from these
+    assert set(ingested_run.montage_picks) == {"axial", "coronal", "sagittal"}
+
+
+def test_ingest_renders_the_same_set_with_parallel_workers(
+    melodic_dir: Path, media_root: Path
+) -> None:
+    # Arrange / Act: the ProcessPool path, which pickles the mask and zooms
+    # into each worker and imports scipy in the child
+    run = services.ingest_run(
+        source=melodic.load_run(run_inputs(melodic_dir)), image_workers=2
+    )
+
+    # Assert
+    assert len(list(montage_dir(media_root, run).iterdir())) == montage.montage_count(
+        N_COMPONENTS, ("func",), montage.SMOOTHINGS
+    )
 
 
 def test_ingest_rolls_back_when_montage_rendering_fails(
@@ -107,7 +142,21 @@ def test_rerender_montages_recreates_files(ingested_run: Run, media_root: Path) 
     call_command("rerender_montages", ingested_run.pk, "--workers", "1")
 
     # Assert
-    assert len(list(out_dir.iterdir())) == N_COMPONENTS * 3
+    assert len(list(out_dir.iterdir())) == montage.montage_count(
+        N_COMPONENTS, ("func",), montage.SMOOTHINGS
+    )
+
+
+def test_rerender_records_the_slice_picks(ingested_run: Run, media_root: Path) -> None:
+    # Arrange: a run from before the picks were recorded
+    ingested_run.montage_picks = {}
+    ingested_run.save(update_fields=["montage_picks"])
+
+    # Act
+    services.rerender_montages(run=ingested_run)
+
+    # Assert: a re-render is where such a run gains its slice labels
+    assert set(ingested_run.montage_picks) == {"axial", "coronal", "sagittal"}
 
 
 def test_rerender_keeps_format_when_rendering_fails(
@@ -224,7 +273,7 @@ def test_montage_urls_are_keyed_by_uuid(ingested_run: Run) -> None:
     urls = selectors.montage_urls(ingested_run.components.get(index=1))
 
     # Assert
-    assert f"/media/runs/{ingested_run.uuid}/" in urls["func"]["axial"]
+    assert f"/media/runs/{ingested_run.uuid}/" in urls["func"]["raw"]["axial"]
 
 
 def test_montage_urls_carry_the_content_digest(ingested_run: Run) -> None:
@@ -233,7 +282,7 @@ def test_montage_urls_carry_the_content_digest(ingested_run: Run) -> None:
 
     # Assert: the digest is in the path, which is what makes the immutable
     # cache header on /media/ honest — different bytes are a different URL
-    assert f"/{ingested_run.montage_digest}/" in urls["func"]["axial"]
+    assert f"/{ingested_run.montage_digest}/" in urls["func"]["raw"]["axial"]
 
 
 def test_rerender_leaves_no_superseded_montages(
@@ -268,7 +317,9 @@ def test_ingest_renders_a_montage_per_background_and_axis(
     files = list(montage_dir(media_root, anat_ingested_run).iterdir())
 
     # Assert
-    assert len(files) == montage.montage_count(N_COMPONENTS, ("func", "anat"))
+    assert len(files) == montage.montage_count(
+        N_COMPONENTS, ("func", "anat"), montage.SMOOTHINGS
+    )
 
 
 def test_ingest_names_the_anatomical_montages(
@@ -276,7 +327,7 @@ def test_ingest_names_the_anatomical_montages(
 ) -> None:
     files = {p.name for p in montage_dir(media_root, anat_ingested_run).iterdir()}
 
-    assert f"ic001_anat_axial.{anat_ingested_run.montage_format}" in files
+    assert f"ic001_anat_raw_axial.{anat_ingested_run.montage_format}" in files
 
 
 def test_rerender_picks_up_a_registration_added_after_ingest(

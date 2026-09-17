@@ -1,4 +1,4 @@
-"""The wire format for one run's montages: a tar of ``ic<NNN>_<bg>_<axis>.<ext>``.
+"""The wire format for one run's montages: a tar of ``ic<NNN>_<bg>_<sm>_<axis>.<ext>``.
 
 Deliberately Django-free, like ``montage.py``: this is the module that decides
 whether bytes arriving from outside are allowed to become files, and it is
@@ -6,9 +6,9 @@ easier to trust — and to test, with no database — when it depends on nothing
 
 The guarantee it provides is that **a name chosen by the sender never reaches a
 storage path**. Every yielded name is rebuilt by ``montage.montage_name`` from
-an integer, a ``BACKGROUNDS`` key, an ``AXES`` key and a format sniffed from
-the bytes themselves; a member whose own name does not parse is refused rather
-than sanitised.
+an integer, a ``BACKGROUNDS`` key, a ``SMOOTHINGS`` key, an ``AXES`` key and a
+format sniffed from the bytes themselves; a member whose own name does not
+parse is refused rather than sanitised.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ def image_format(data: bytes) -> str:
 
     A magic-byte sniff rather than a Pillow decode: the sender is
     authenticated, the whole set is verified by digest afterwards, and a real
-    decode would be ~288 of them per run on a two-core box.
+    decode would be ~1,150 of them per run on a two-core box.
     """
     if data.startswith(_PNG_MAGIC):
         return "png"
@@ -61,20 +61,21 @@ def read_montage_tar(
     *,
     n_components: int,
     backgrounds: Sequence[str],
+    smoothings: Sequence[str],
     montage_format: str,
     max_member_bytes: int,
 ) -> Iterator[tuple[str, bytes]]:
     """Yield ``(rebuilt name, bytes)`` for each montage in an uploaded tar.
 
     Streamed (``mode="r|"``), so peak memory is one member rather than the
-    whole ~20 MB archive. Refuses, in this order and before reading any
+    whole ~70 MB archive. Refuses, in this order and before reading any
     payload: anything that is not a regular file (which is what excludes
     symlinks, hard links and device nodes), an oversized member, more members
     than the run can have, a name that is not a montage name, a component index
-    outside the run, a background the run did not declare, and a format that
-    disagrees with the run's.
+    outside the run, a background or smoothing level the run did not declare,
+    and a format that disagrees with the run's.
     """
-    max_members = montage_count(n_components, backgrounds)
+    max_members = montage_count(n_components, backgrounds, smoothings)
     seen = 0
     with tarfile.open(fileobj=fileobj, mode="r|") as tar:
         for member in tar:
@@ -93,7 +94,7 @@ def read_montage_tar(
             parsed = parse_montage_name(member.name)
             if parsed is None:
                 raise RejectedMontage(f"{member.name!r} is not a montage name")
-            index, background, axis, ext = parsed
+            index, background, smoothing, axis, ext = parsed
             if index > n_components:
                 raise RejectedMontage(
                     f"component {index} in a run with {n_components} components"
@@ -101,6 +102,10 @@ def read_montage_tar(
             if background not in backgrounds:
                 raise RejectedMontage(
                     f"a {background} montage in a run that declares {list(backgrounds)}"
+                )
+            if smoothing not in smoothings:
+                raise RejectedMontage(
+                    f"a {smoothing} montage in a run that declares {list(smoothings)}"
                 )
             handle = tar.extractfile(member)
             if handle is None:  # unreachable for isfile(), but typed Optional
@@ -112,7 +117,7 @@ def read_montage_tar(
                     f"{member.name!r} is a {sniffed}, but the run is "
                     f"{montage_format} and the name says {ext}"
                 )
-            yield montage_name(index, background, axis, sniffed), data
+            yield montage_name(index, background, smoothing, axis, sniffed), data
 
 
 def write_montage_tar(members: Iterable[tuple[str, bytes]], fileobj: IO[bytes]) -> int:

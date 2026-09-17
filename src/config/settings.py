@@ -271,9 +271,10 @@ INGEST_ENABLED = env.bool("MELRATER_INGEST_ENABLED", default=DEBUG)
 
 # The API's own ceilings, sized against the deployed box (2 vCPU / 4 GB, the
 # container capped at 1500m) and a real run: 96 components over two backgrounds
-# -> 576 montages, ~70 MB of tar and ~2.5 MB of JSON. The tar ceiling has to
-# clear the largest run this server will see, not the typical one: at 256
-# components it is around 190 MB. Note that none of these raises a *Django*
+# and two smoothing levels -> 1,152 montages, ~66 MB of tar (measured, with the
+# functional grid at voxel resolution) and ~2.5 MB of JSON. The tar ceiling has
+# to clear the largest run this server will see, not the typical one: at 256
+# components it is around 176 MB. Note that none of these raises a *Django*
 # limit. A pushed run arrives as two multipart FILE parts, and
 # DATA_UPLOAD_MAX_MEMORY_SIZE is calculated excluding file upload data, so its
 # 2.5 MB default keeps guarding /accounts/login/ and the rating POST untouched

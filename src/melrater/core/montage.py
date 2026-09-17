@@ -6,10 +6,23 @@ the 75 display planes (25 slices x 3 axes) a run shows, already sampled onto
 the montage's own pixel grid, because those planes are the same for every
 component of the run and are built once rather than per component.
 
+Each component is rendered at two smoothing levels: its z-map as MELODIC wrote
+it (``raw``) and a Gaussian-smoothed version (``smooth``, see ``smooth.py``),
+following Griffanti et al. (2017) — unsmoothed maps carry many small scattered
+clusters whether or not a component is noise, and the smoothed map is where
+"a low number of large clusters" can be read off. The two are separate files
+because they are two different pictures of the same thing.
+
 Overlays use transparent thresholding ("highlight, don't hide"; Taylor et
 al. 2025, "Go Figure", https://pmc.ncbi.nlm.nih.gov/articles/PMC12036441/):
 nothing is hidden — opacity ramps quadratically with |z| until Z_THRESH,
 above which the overlay is fully opaque.
+
+A montage is pixels only. The functional grid is encoded at voxel resolution
+and the browser upscales it (CSS ``image-rendering: pixelated``); the cells
+tile with no gap, and the slice-index and edge labels are drawn by the page
+over the image from ``Run.montage_picks``, so they stay sharp and are not
+baked into a thousand lossy files.
 
 Volumes are reoriented to closest-canonical (RAS); axial and coronal montages
 display neurological convention (subject L on image left), sagittal shows
@@ -29,7 +42,7 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 from nibabel.orientations import apply_orientation, inv_ornt_aff, io_orientation
-from PIL import Image, ImageDraw
+from PIL import Image
 from PIL import features as pil_features
 
 try:
@@ -42,9 +55,16 @@ except ImportError:
 Z_THRESH = 3.0  # |z| at which the overlay becomes fully opaque
 OVERLAY_VMAX = 10.0  # |z| at which the overlay color saturates
 ALPHA_GAMMA = 2.0  # quadratic opacity ramp below Z_THRESH ("Go Figure")
-UPSCALE = 2  # nearest-neighbour upscale of montage voxels
+#: Display-grid subdivisions per functional voxel. 1 is the voxel grid itself:
+#: the browser does the upscaling (`image-rendering: pixelated` reproduces the
+#: nearest-neighbour blocks a server-side 2x used to bake in), and a montage at
+#: voxel resolution is ~2.5x fewer bytes than the same picture at 2x.
+UPSCALE = 1
 MIN_SLICE_COVERAGE = 0.05  # mask fraction for a slice to be shown
 N_LIGHTBOX = 25
+#: Columns of the lightbox grid. The page positions its slice labels from this
+#: and the row count, so it is one number rather than a `cols=` default.
+LIGHTBOX_COLS = 5
 #: Hex characters of the montage-set digest kept for the storage path. 64 bits:
 #: a collision would only serve one run's cached montages for another, and the
 #: whole population is a few hundred runs.
@@ -57,13 +77,17 @@ AXES = {"sagittal": 0, "coronal": 1, "axial": 2}
 #: resampled by `resample.py`) is there only for a run that was registered.
 BACKGROUNDS = ("func", "anat")
 
+#: Overlay smoothing levels, in display order. "raw" is the z-map as MELODIC
+#: wrote it and every run has it; "smooth" is `smooth.smooth_zmap` of the same
+#: map. Both need nothing but the IC map and the mask, so every run rendered
+#: since this vocabulary existed has both; the per-run list on the row exists
+#: so the montage count arithmetic stays honest for one that does not.
+SMOOTHINGS = ("raw", "smooth")
+
 _POS_LO = np.array([1.0, 0.0, 0.0])  # red
 _POS_HI = np.array([1.0, 1.0, 0.0])  # yellow
 _NEG_LO = np.array([0.0, 0.2, 1.0])  # blue
 _NEG_HI = np.array([0.6, 1.0, 1.0])  # light blue
-
-# left/right edge annotations per display axis (0=sagittal, 1=coronal, 2=axial)
-_EDGE_LABELS = {0: ("P", "A"), 1: ("L", "R"), 2: ("L", "R")}
 
 
 def canonical_vol(img: nib.nifti1.Nifti1Image, idx: int | None = None) -> np.ndarray:
@@ -91,6 +115,16 @@ def canonical_affine(img: nib.nifti1.Nifti1Image) -> np.ndarray:
         img.affine @ inv_ornt_aff(io_orientation(img.affine), img.shape[:3]),
         dtype=float,
     )
+
+
+def canonical_zooms(img: nib.nifti1.Nifti1Image) -> np.ndarray:
+    """Voxel sizes (mm) along the axes of the array ``canonical_vol`` returns.
+
+    The column norms of ``canonical_affine`` rather than the header's zooms:
+    the reorientation permutes axes, and a kernel specified in millimetres
+    has to know which array axis is which.
+    """
+    return np.sqrt((canonical_affine(img)[:3, :3] ** 2).sum(axis=0))
 
 
 def robust_window(bg: np.ndarray, mask: np.ndarray) -> tuple[float, float]:
@@ -185,10 +219,11 @@ def display_plane(
 ) -> np.ndarray:
     """One slice of a same-grid volume, in display orientation at ``factor``.
 
-    Nearest-neighbour, which at an integer ``factor`` is the plain pixel
-    replication the montage has always done. Pinned to ``display_points`` by a
-    test: the two must address the same voxel for every pixel, or a background
-    and the z-map drawn over it would be silently sheared apart.
+    Nearest-neighbour: at 1 this is the voxel grid itself, at an integer
+    ``factor`` the plain pixel replication the montage used to bake in. Pinned
+    to ``display_points`` by a test: the two must address the same voxel for
+    every pixel, or a background and the z-map drawn over it would be silently
+    sheared apart.
     """
     p, q = (i for i in range(3) if i != axis)
     cols = np.clip(np.rint(_fine(vol.shape[p], factor)), 0, vol.shape[p] - 1)
@@ -234,9 +269,8 @@ class Background:
     ``planes[axis_name]`` is ``(n_picks, H, W)`` uint8: already in display
     orientation, already at ``factor``, already windowed. ``factor`` is how
     finely the display grid subdivides the *functional* voxel grid, so the
-    overlay can be sampled to match — 2 for the functional background (plain
-    pixel replication, as always), higher for an anatomical carried at its own
-    resolution.
+    overlay can be sampled to match — 1 for the functional background (the
+    voxel grid itself), higher for an anatomical carried at its own resolution.
     """
 
     name: str
@@ -249,38 +283,22 @@ def render_lightbox(
     # (n_picks, H, W) stack, which iterates into planes but is not a Sequence
     bg_planes: Iterable[np.ndarray],
     ov_planes: Iterable[np.ndarray],
-    picks: Sequence[int],
-    axis: int = 2,
-    cols: int = 5,
+    cols: int = LIGHTBOX_COLS,
 ) -> Image.Image:
-    """One axis' lightbox. ``picks`` is only for the slice-index labels now.
+    """One axis' lightbox: the cells tiled row-major, nothing else.
 
-    Those labels stay the *functional* volume's indices whatever grid the
-    background was sampled on, so the number under a slice does not change when
-    a reviewer swaps backgrounds.
+    No gap and no text. The cells tile exactly so that the page can place a
+    slice label at ``(col / cols, row / rows)`` of the image without knowing
+    its pixel size; the labels themselves come from ``Run.montage_picks``.
     """
     cells = [slice_rgb(b, o) for b, o in zip(bg_planes, ov_planes, strict=True)]
     ch, cw, _ = cells[0].shape
     rows = -(-len(cells) // cols)
-    gap = 2
-    canvas = np.zeros(
-        (rows * ch + (rows - 1) * gap, cols * cw + (cols - 1) * gap, 3), np.uint8
-    )
+    canvas = np.zeros((rows * ch, cols * cw, 3), np.uint8)
     for i, cell in enumerate(cells):
         r, c = divmod(i, cols)
-        y0, x0 = r * (ch + gap), c * (cw + gap)
-        canvas[y0 : y0 + ch, x0 : x0 + cw] = cell
-    img = Image.fromarray(canvas)
-    draw = ImageDraw.Draw(img)
-    for i, idx in enumerate(picks):
-        r, c = divmod(i, cols)
-        draw.text(
-            (c * (cw + gap) + 4, r * (ch + gap) + 2), str(idx), fill=(150, 155, 165)
-        )
-    left, right = _EDGE_LABELS[axis]
-    draw.text((4, ch - 16), left, fill=(200, 205, 215))
-    draw.text((cw - 12, ch - 16), right, fill=(200, 205, 215))
-    return img
+        canvas[r * ch : (r + 1) * ch, c * cw : (c + 1) * cw] = cell
+    return Image.fromarray(canvas)
 
 
 def encode(img: Image.Image) -> tuple[bytes, str]:
@@ -299,34 +317,40 @@ def encode(img: Image.Image) -> tuple[bytes, str]:
     return buf.getvalue(), "png"
 
 
-def montage_name(index: int, background: str, axis_name: str, ext: str) -> str:
-    return f"ic{index:03d}_{background}_{axis_name}.{ext}"
+def montage_name(
+    index: int, background: str, smoothing: str, axis_name: str, ext: str
+) -> str:
+    return f"ic{index:03d}_{background}_{smoothing}_{axis_name}.{ext}"
 
 
-def montage_count(n_components: int, backgrounds: Sequence[str]) -> int:
+def montage_count(
+    n_components: int, backgrounds: Sequence[str], smoothings: Sequence[str]
+) -> int:
     """How many files one run's complete montage set holds.
 
     The single home for that arithmetic: the tar reader caps members with it
     and the ingest API checks the stored set against it, and those two numbers
     disagreeing is exactly how a truncated push would slip through.
     """
-    return n_components * len(backgrounds) * len(AXES)
+    return n_components * len(backgrounds) * len(smoothings) * len(AXES)
 
 
 #: The exact inverse of ``montage_name``, and the only thing that turns an
 #: outside string into a stored path. ``\Z`` rather than ``$``: ``$`` also
-#: matches before a trailing newline, so ``"ic001_axial.avif\n"`` would pass
-#: and the rebuilt name would differ from the one that was checked.
+#: matches before a trailing newline, so ``"ic001_func_raw_axial.avif\n"``
+#: would pass and the rebuilt name would differ from the one that was checked.
 MONTAGE_NAME_RE = re.compile(
-    rf"ic(\d{{3}})_({'|'.join(BACKGROUNDS)})_({'|'.join(AXES)})\.(avif|png)\Z"
+    rf"ic(\d{{3}})_({'|'.join(BACKGROUNDS)})_({'|'.join(SMOOTHINGS)})"
+    rf"_({'|'.join(AXES)})\.(avif|png)\Z"
 )
 
 
-def parse_montage_name(name: str) -> tuple[int, str, str, str] | None:
-    """``'ic007_anat_axial.avif'`` -> ``(7, 'anat', 'axial', 'avif')``, else None.
+def parse_montage_name(name: str) -> tuple[int, str, str, str, str] | None:
+    """``'ic007_anat_smooth_axial.avif'`` -> ``(7, 'anat', 'smooth', 'axial', 'avif')``.
 
-    Callers rebuild the stored name with ``montage_name(*parsed)`` rather than
-    reusing ``name``, so nothing a client chose ever reaches a storage path.
+    ``None`` for anything else. Callers rebuild the stored name with
+    ``montage_name(*parsed)`` rather than reusing ``name``, so nothing a client
+    chose ever reaches a storage path.
     """
     match = MONTAGE_NAME_RE.fullmatch(name)
     if match is None:
@@ -334,7 +358,7 @@ def parse_montage_name(name: str) -> tuple[int, str, str, str] | None:
     index = int(match[1])
     if index < 1:  # IC numbers are 1-based; ic000 is not a component
         return None
-    return index, match[2], match[3], match[4]
+    return index, match[2], match[3], match[4], match[5]
 
 
 def digest_montages(members: Iterable[tuple[str, bytes]]) -> str:
@@ -379,24 +403,29 @@ def digest_directory(staged: Path) -> str:
 
 
 def render_component_montages(
-    ov: np.ndarray,
+    overlays: Mapping[str, np.ndarray],
     backgrounds: Sequence[Background],
     picks_by_axis: Mapping[str, Sequence[int]],
     out_dir: Path,
     index: int,
 ) -> None:
-    """Render one component's lightboxes: one file per background per axis."""
+    """Render one component's lightboxes: a file per background, smoothing and axis.
+
+    ``overlays`` maps a ``SMOOTHINGS`` key to that version of the component's
+    z-map, on the functional grid.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     for axis_name, axis in AXES.items():
         picks = picks_by_axis[axis_name]
         for background in backgrounds:
-            ov_planes = [display_plane(ov, axis, i, background.factor) for i in picks]
-            img = render_lightbox(
-                background.planes[axis_name], ov_planes, picks, axis=axis
-            )
-            data, ext = encode(img)
-            name = montage_name(index, background.name, axis_name, ext)
-            (out_dir / name).write_bytes(data)
+            for smoothing, ov in overlays.items():
+                ov_planes = [
+                    display_plane(ov, axis, i, background.factor) for i in picks
+                ]
+                img = render_lightbox(background.planes[axis_name], ov_planes)
+                data, ext = encode(img)
+                name = montage_name(index, background.name, smoothing, axis_name, ext)
+                (out_dir / name).write_bytes(data)
 
 
 # ProcessPool worker state: initialized once per worker process. This module is
@@ -407,13 +436,19 @@ _WORKER: dict = {}
 def _init_worker(
     ic_path: str,
     backgrounds: tuple[Background, ...],
+    smoothings: tuple[str, ...],
     picks_by_axis: dict[str, list[int]],
+    mask: np.ndarray,
+    zooms: np.ndarray,
     out_dir: str,
 ) -> None:
     _WORKER.update(
         ic_img=nib.load(ic_path),
         backgrounds=backgrounds,
+        smoothings=smoothings,
         picks=picks_by_axis,
+        mask=mask,
+        zooms=zooms,
         out_dir=Path(out_dir),
     )
 
@@ -422,8 +457,23 @@ def _render_one(index: int) -> int:
     ic_img = _WORKER["ic_img"]
     assert isinstance(ic_img, nib.nifti1.Nifti1Image)
     ov = canonical_vol(ic_img, index - 1)
+    overlays: dict[str, np.ndarray] = {}
+    for smoothing in _WORKER["smoothings"]:
+        if smoothing == "raw":
+            overlays[smoothing] = ov
+        elif smoothing == "smooth":
+            # deferred: smooth needs scipy, which is in the `render` pixi
+            # feature and deliberately not in the runtime image — the server
+            # imports this module for the ingest API but never renders
+            from melrater.core import smooth
+
+            overlays[smoothing] = smooth.smooth_zmap(
+                ov, _WORKER["mask"], _WORKER["zooms"]
+            )
+        else:
+            raise ValueError(f"unknown smoothing: {smoothing!r}")
     render_component_montages(
-        ov,
+        overlays,
         _WORKER["backgrounds"],
         _WORKER["picks"],
         _WORKER["out_dir"],
@@ -436,7 +486,10 @@ def render_run_montages(
     ic_path: Path,
     indices: list[int],
     backgrounds: Sequence[Background],
+    smoothings: Sequence[str],
     picks_by_axis: dict[str, list[int]],
+    mask: np.ndarray,
+    zooms: np.ndarray,
     out_dir: Path,
     workers: int = 0,
 ) -> None:
@@ -444,9 +497,18 @@ def render_run_montages(
 
     The backgrounds are pickled into each worker once: they are the same 75
     planes for every component, so a run's whole background cost is paid at
-    pool startup rather than per montage.
+    pool startup rather than per montage. The mask (a bool volume) and the
+    voxel sizes travel the same way, for the smoothed overlay.
     """
-    initargs = (str(ic_path), tuple(backgrounds), picks_by_axis, str(out_dir))
+    initargs = (
+        str(ic_path),
+        tuple(backgrounds),
+        tuple(smoothings),
+        picks_by_axis,
+        np.asarray(mask) > 0,
+        np.asarray(zooms, dtype=float),
+        str(out_dir),
+    )
     if workers > 1:
         from concurrent.futures import ProcessPoolExecutor
 

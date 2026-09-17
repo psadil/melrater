@@ -119,8 +119,8 @@ def anat_factor(
 ) -> float:
     """How finely to subdivide the functional grid to carry the anatomical.
 
-    Its own resolution, floored at the montage's usual upscale (so the
-    anatomical is never coarser than the functional background) and capped at
+    Its own resolution, floored at ``montage.UPSCALE`` (so the anatomical is
+    never sampled coarser than the functional grid) and capped at
     ``MAX_FACTOR``.
     """
     func = min(float(z) for z in func_img.header.get_zooms()[:3])

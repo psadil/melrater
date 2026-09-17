@@ -42,6 +42,13 @@ def test_every_metric_entry_links_to_its_pyfix_source() -> None:
     assert all(any("::" in link.text for link in e.links) for e in metrics)
 
 
+def test_the_rating_guide_cites_griffanti() -> None:
+    # Assert: the decision procedure is theirs, and the link says so
+    links = help_catalog.CATALOG.entries["field.rating"].links
+
+    assert any("10.1016/j.neuroimage.2016.12.036" in link.url for link in links)
+
+
 def test_slugs_are_valid_html_ids() -> None:
     slugs = [e.slug for e in help_catalog.CATALOG.entries.values()]
 

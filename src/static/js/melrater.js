@@ -1,4 +1,4 @@
-// melrater — axis switcher, keyboard shortcuts, jump box, auto-advance.
+// melrater — montage switchers, keyboard shortcuts, jump box, auto-advance.
 // State lives on the backend; this only toggles pre-rendered content, clicks
 // htmx-wired buttons, and keeps one per-browser preference in localStorage.
 (() => {
@@ -25,16 +25,25 @@
   };
 
   // Only the visible montage carries a src; the others wait here until first
-  // shown, so a component page loads one image instead of six.
-  const showMontage = (bg, axis) => {
+  // shown, so a component page loads one image instead of twelve. The three
+  // choices — axis, background, smoothing — are independent, so a swap of one
+  // keeps the other two.
+  const showMontage = ({ bg, axis, sm }) => {
     document.querySelectorAll("[data-axis-btn]").forEach((b) =>
       b.classList.toggle("active", b.dataset.axisBtn === axis));
     document.querySelectorAll("[data-bg-btn]").forEach((b) =>
       b.classList.toggle("active", b.dataset.bgBtn === bg));
+    document.querySelectorAll("[data-sm-btn]").forEach((b) =>
+      b.classList.toggle("active", b.dataset.smBtn === sm));
     document.querySelectorAll("[data-bg-caption]").forEach((c) =>
       c.classList.toggle("active", c.dataset.bgCaption === bg));
+    document.querySelectorAll("[data-sm-caption]").forEach((c) =>
+      c.classList.toggle("active", c.dataset.smCaption === sm));
+    document.querySelectorAll("[data-axis-frame]").forEach((f) =>
+      f.classList.toggle("active", f.dataset.axisFrame === axis));
     document.querySelectorAll("[data-axis-img]").forEach((img) => {
-      const active = img.dataset.axisImg === axis && img.dataset.bgImg === bg;
+      const active = img.dataset.axisImg === axis &&
+        img.dataset.bgImg === bg && img.dataset.smImg === sm;
       if (active && !img.getAttribute("src") && img.dataset.src) {
         img.src = img.dataset.src;
       }
@@ -44,17 +53,41 @@
 
   const currentAxis = () =>
     document.querySelector("[data-axis-btn].active")?.dataset.axisBtn;
-  // an unregistered run renders no background buttons at all, so fall back to
-  // whichever montage is on screen
+  // a run with a single background (or smoothing level) renders no buttons
+  // for it at all, so fall back to whichever montage is on screen
   const currentBg = () =>
     document.querySelector("[data-bg-btn].active")?.dataset.bgBtn ??
     document.querySelector("[data-axis-img].active")?.dataset.bgImg;
+  const currentSm = () =>
+    document.querySelector("[data-sm-btn].active")?.dataset.smBtn ??
+    document.querySelector("[data-axis-img].active")?.dataset.smImg;
+  const current = () => ({ bg: currentBg(), axis: currentAxis(), sm: currentSm() });
+
+  // Montages are encoded at voxel resolution and shown at twice that. On a
+  // window wide enough, pin the frame to exactly 2x the image's own width so
+  // the nearest-neighbour upscale (image-rendering: pixelated) lands on whole
+  // pixels; narrower windows fall back to the stylesheet's cap. The functional
+  // image is the reference: the anatomical is finer and is shown at the same
+  // size, so swapping backgrounds does not move the page.
+  const pinFrame = (img) => {
+    if (img.dataset.bgImg !== "func" || !img.naturalWidth) return;
+    const frame = img.closest("[data-axis-frame]");
+    if (frame) frame.style.maxWidth = `${2 * img.naturalWidth}px`;
+  };
+  document.addEventListener("load", (e) => {
+    if (e.target.matches?.("img[data-axis-img]")) pinFrame(e.target);
+  }, true);
+  document.querySelectorAll("img[data-axis-img]").forEach((img) => {
+    if (img.complete) pinFrame(img);
+  });
 
   document.addEventListener("click", (e) => {
     const ax = e.target.closest("[data-axis-btn]");
-    if (ax) { showMontage(currentBg(), ax.dataset.axisBtn); return; }
+    if (ax) { showMontage({ ...current(), axis: ax.dataset.axisBtn }); return; }
     const bg = e.target.closest("[data-bg-btn]");
-    if (bg) { showMontage(bg.dataset.bgBtn, currentAxis()); return; }
+    if (bg) { showMontage({ ...current(), bg: bg.dataset.bgBtn }); return; }
+    const sm = e.target.closest("[data-sm-btn]");
+    if (sm) { showMontage({ ...current(), sm: sm.dataset.smBtn }); return; }
     const box = e.target.closest("[data-auto-advance]");
     if (box) setAutoAdvance(box.checked);
   });
@@ -80,6 +113,14 @@
     el.isContentEditable ||
     (el.tagName === "INPUT" && !TYPING_TYPES.includes(el.type));
 
+  const cycle = (selector) => {
+    const btns = [...document.querySelectorAll(selector)];
+    if (btns.length > 1) {
+      const at = btns.findIndex((b) => b.classList.contains("active"));
+      btns[(at + 1) % btns.length].click();
+    }
+  };
+
   document.addEventListener("keydown", (e) => {
     if (isTyping(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
     const rate = (label) =>
@@ -94,17 +135,12 @@
     else if (e.key === "2" || e.key === "u") rate("Unknown");
     else if (e.key === "3" || e.key === "n") rate("Noise");
     else if (e.key === "a") setAutoAdvance(!autoAdvanceOn());
-    else if (e.key === "b") {
-      // cycle rather than toggle, and go through .click() rather than calling
-      // showMontage: that one path fires both the visual swap and htmx's
-      // preference POST, so the choice survives navigation exactly as the
-      // axis buttons' does
-      const btns = [...document.querySelectorAll("[data-bg-btn]")];
-      if (btns.length > 1) {
-        const at = btns.findIndex((b) => b.classList.contains("active"));
-        btns[(at + 1) % btns.length].click();
-      }
-    }
+    // Cycle rather than toggle, and go through .click() rather than calling
+    // showMontage: that one path fires both the visual swap and htmx's
+    // preference POST, so the choice survives navigation.
+    else if (e.key === "b") cycle("[data-bg-btn]");
+    else if (e.key === "m") cycle("[data-sm-btn]");
+    else if (e.key === "o") cycle("[data-axis-btn]");
     else if (e.key === "g") {
       const jump = document.getElementById("jump");
       if (jump) {

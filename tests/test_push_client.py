@@ -9,7 +9,7 @@ import pytest
 from django.core.management import call_command
 from django.core.management.base import CommandError
 
-from melrater.core import push
+from melrater.core import montage, push
 from melrater.core.models import Run
 from tests.conftest import N_COMPONENTS
 
@@ -172,7 +172,9 @@ def test_push_runs_sends_a_tar_of_every_montage(
     marker = b'filename="montages.tar"\r\nContent-Type: application/x-tar\r\n\r\n'
     tar = body.split(marker, 1)[1].rsplit(b"\r\n--", 1)[0]
     with tarfile.open(fileobj=io.BytesIO(tar)) as archive:
-        assert len(archive.getnames()) == 3 * N_COMPONENTS
+        assert len(archive.getnames()) == montage.montage_count(
+            N_COMPONENTS, ("func",), montage.SMOOTHINGS
+        )
 
 
 def test_push_runs_skips_a_run_the_server_is_current_on(

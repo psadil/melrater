@@ -91,20 +91,41 @@ input.jump {
 .ratebar .rate-buttons { flex: 0 0 480px; }
 .progress { color: var(--muted); font-size: 12px; margin-left: auto; }
 
-.axis-btns { display: flex; gap: 6px; margin-bottom: 10px; align-items: stretch; }
-.axis-btn, .bg-btn {
+.montage-btns { display: flex; gap: 6px; margin-bottom: 10px; align-items: stretch; }
+.axis-btn, .bg-btn, .sm-btn {
   background: none; border: 1px solid var(--border); border-radius: 6px;
   color: var(--muted); padding: 3px 12px; cursor: pointer; font: inherit;
   font-size: 12px;
 }
-.axis-btn.active, .bg-btn.active { color: var(--text); background: var(--panel2); border-color: var(--accent); }
+.axis-btn.active, .bg-btn.active, .sm-btn.active { color: var(--text); background: var(--panel2); border-color: var(--accent); }
 .btn-sep { width: 1px; background: var(--border); margin: 2px 4px; }
 .btn-key { color: var(--muted); font-size: 11px; align-self: center; }
+/* One frame per axis holds that axis' images and the label layer they share.
+   Montages are encoded at voxel resolution (the functional) or the T1's own
+   grid (the anatomical), so their intrinsic widths differ; the frame shows
+   whichever is active at one displayed size — the stylesheet's cap until
+   melrater.js pins the frame to exactly twice the functional image's width. */
+.montage-frame { position: relative; display: none; width: 100%; max-width: 908px; }
+.montage-frame.active { display: block; }
 .montage { width: 100%; height: auto; border-radius: 4px; }
-/* The anatomical montages are rendered on a finer grid, so the two backgrounds
-   have different intrinsic widths; both are shown at the same displayed size. */
-img[data-axis-img] { display: none; max-width: 908px; }
+img[data-axis-img] { display: none; }
 img[data-axis-img].active { display: block; }
+/* the browser's nearest-neighbour upscale is the voxel grid; the anatomical is
+   downscaled, and smooth scaling is right for that */
+img[data-bg-img="func"] { image-rendering: pixelated; }
+/* The montage is pixels only. Its cells tile with no gap, so a label sits at
+   (col / cols, row / rows) of the image whatever its pixel size or scale. */
+.slice-labels {
+  position: absolute; inset: 0; pointer-events: none;
+  font-size: 11px; line-height: 1; color: var(--muted);
+}
+.slice-label, .edge-label {
+  position: absolute; text-shadow: 0 0 3px #000, 0 0 3px #000;
+}
+.slice-label { padding: 3px 0 0 4px; }
+.edge-label { color: #c8cdd7; top: calc(100% / var(--rows) - 15px); }
+.edge-left { left: 4px; }
+.edge-right { left: calc(100% / var(--cols) - 13px); }
 .montage-caption { color: var(--muted); font-size: 11px; margin-top: 6px; display: none; }
 .montage-caption.active { display: block; }
 
@@ -194,6 +215,12 @@ code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-siz
 }
 .run-filter .resume { border-color: var(--accent); color: var(--accent); }
 .pager { display: flex; gap: 10px; align-items: center; justify-content: center; margin-top: 14px; }
+
+/* the "how to decide" bubble beside the rating buttons */
+.rate-guide {
+  display: flex; gap: 6px; align-items: center; color: var(--muted);
+  font-size: 12px; white-space: nowrap;
+}
 
 /* auto-advance toggle in the rating bar */
 .autoadvance {

@@ -1,3 +1,4 @@
+{% load help_tags %}
 <div class="ratebar" id="ratebar"
      {% if next_index %}data-next-url="{% url 'component-detail' run.pk next_index %}"{% endif %}>
   <div class="rate-buttons">
@@ -11,6 +12,7 @@
       </button>
     {% endfor %}
   </div>
+  <span class="rate-guide">how to decide{% help_bubble "field.rating" %}</span>
   <label class="autoadvance" title="after rating, go straight to the next component">
     <input type="checkbox" data-auto-advance> auto-advance <kbd>a</kbd>
   </label>

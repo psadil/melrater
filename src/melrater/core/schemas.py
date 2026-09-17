@@ -22,6 +22,10 @@ from pydantic import BaseModel, ConfigDict
 #: sides negotiate should not change silently when a constant does.
 Background = Literal["func", "anat"]
 
+#: An overlay smoothing level, mirroring montage.SMOOTHINGS, spelled out for
+#: the same reason.
+Smoothing = Literal["raw", "smooth"]
+
 
 class MetricValue(BaseModel):
     """One pyFIX metric for one component."""
@@ -62,6 +66,8 @@ class RunData(BaseModel):
     metric_stats: MetricStats
     montage_format: str
     montage_backgrounds: tuple[Background, ...]
+    montage_smoothings: tuple[Smoothing, ...]
+    montage_picks: dict[str, list[int]]
 
 
 class ComponentData(BaseModel):
@@ -142,6 +148,12 @@ class RunPayload(BaseModel):
     #: client against an old server — the loud one, which is the right way
     #: round for a push that would otherwise store a half set.
     backgrounds: tuple[Background, ...] = ("func",)
+    #: Which smoothing levels the tar carries, and which slice indices each
+    #: axis' lightbox shows (the page draws them as labels). Defaulted for the
+    #: same reason as `backgrounds`: a payload written before either existed
+    #: still validates, and its old-style montage names are what get refused.
+    smoothings: tuple[Smoothing, ...] = ("raw",)
+    picks: dict[str, list[int]] = {}
     components: list[ComponentPayload]
     fix: list[FixReviewerPayload]
 

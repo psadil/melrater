@@ -60,7 +60,8 @@ def test_component_detail_embeds_montage(logged_in, ingested_run: Run) -> None:
 
     # Assert
     assert (
-        f"ic001_func_axial.{ingested_run.montage_format}" in response.content.decode()
+        f"ic001_func_raw_axial.{ingested_run.montage_format}"
+        in response.content.decode()
     )
 
 
@@ -196,7 +197,7 @@ def _montage_url(run: Run) -> str:
     """The first montage's URL, digest and all."""
     return (
         f"/media/runs/{run.uuid}/{run.montage_digest}"
-        f"/ic001_func_axial.{run.montage_format}"
+        f"/ic001_func_raw_axial.{run.montage_format}"
     )
 
 
@@ -328,8 +329,9 @@ def test_component_page_gives_only_the_active_axis_a_src(
     # Act
     body = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/").content.decode()
 
-    # Assert: two of the three montages wait behind data-src until switched to
-    assert body.count('data-src="/media/') == 2
+    # Assert: five of the six montages (two smoothing levels, three axes) wait
+    # behind data-src until switched to
+    assert body.count('data-src="/media/') == 5
 
 
 def test_component_page_prefetches_the_next_montage(
@@ -441,7 +443,8 @@ def test_background_preference_falls_back_for_a_run_without_one(
     # broken images
     assert (
         f'src="/media/runs/{ingested_run.uuid}/{ingested_run.montage_digest}'
-        f'/ic001_func_axial.{ingested_run.montage_format}"' in response.content.decode()
+        f'/ic001_func_raw_axial.{ingested_run.montage_format}"'
+        in response.content.decode()
     )
 
 
@@ -461,8 +464,8 @@ def test_component_page_gives_only_the_active_montage_a_src(
     # Act
     response = logged_in.get(f"/runs/{anat_ingested_run.pk}/ic/1/")
 
-    # Assert: six montages on the page, five of them deferred
-    assert response.content.decode().count('data-src="/media/') == 5
+    # Assert: twelve montages on the page, eleven of them deferred
+    assert response.content.decode().count('data-src="/media/') == 11
 
 
 def test_prefetch_follows_the_chosen_background(logged_in, anat_ingested_run) -> None:
@@ -479,6 +482,155 @@ def test_prefetch_follows_the_chosen_background(logged_in, anat_ingested_run) ->
     assert (
         f'rel="prefetch" as="image" href="/media/runs/{anat_ingested_run.uuid}'
         f"/{anat_ingested_run.montage_digest}"
-        f'/ic002_anat_axial.{anat_ingested_run.montage_format}"'
+        f'/ic002_anat_raw_axial.{anat_ingested_run.montage_format}"'
         in response.content.decode()
     )
+
+
+# --- montage smoothing --------------------------------------------------
+
+
+def test_default_smoothing_is_the_unsmoothed_map(logged_in, ingested_run: Run) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert: the map as MELODIC wrote it is what a reviewer lands on
+    assert 'class="sm-btn active" data-sm-btn="raw"' in response.content.decode()
+
+
+def test_set_smoothing_stores_the_session_preference(logged_in) -> None:
+    # Act
+    logged_in.post("/prefs/smoothing/", {"smoothing": "smooth"})
+
+    # Assert
+    assert logged_in.session["montage_smoothing"] == "smooth"
+
+
+def test_set_smoothing_rejects_an_unknown_level(logged_in) -> None:
+    # Act
+    response = logged_in.post("/prefs/smoothing/", {"smoothing": "blur"})
+
+    # Assert
+    assert response.status_code == 400
+
+
+def test_set_smoothing_requires_login(client) -> None:
+    # Act
+    response = client.post("/prefs/smoothing/", {"smoothing": "smooth"})
+
+    # Assert
+    assert response.status_code == 302
+
+
+def test_smoothing_preference_falls_back_for_a_run_without_one(
+    logged_in, ingested_run: Run
+) -> None:
+    # Arrange: a run rendered before the smoothed variant, and a reviewer who
+    # chose it on some other run
+    ingested_run.montage_smoothings = ["raw"]
+    ingested_run.save(update_fields=["montage_smoothings"])
+    session = logged_in.session
+    session["montage_smoothing"] = "smooth"
+    session.save()
+
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert: the unsmoothed montage gets the src, not a broken image
+    assert (
+        f'src="/media/runs/{ingested_run.uuid}/{ingested_run.montage_digest}'
+        f'/ic001_func_raw_axial.{ingested_run.montage_format}"'
+        in response.content.decode()
+    )
+
+
+def test_component_page_offers_no_smoothing_switch_without_one(
+    logged_in, ingested_run: Run
+) -> None:
+    # Arrange
+    ingested_run.montage_smoothings = ["raw"]
+    ingested_run.save(update_fields=["montage_smoothings"])
+
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert: one level is not a choice
+    assert "data-sm-btn" not in response.content.decode()
+
+
+def test_prefetch_follows_the_chosen_smoothing(logged_in, ingested_run: Run) -> None:
+    # Arrange
+    session = logged_in.session
+    session["montage_smoothing"] = "smooth"
+    session.save()
+
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert
+    assert (
+        f'rel="prefetch" as="image" href="/media/runs/{ingested_run.uuid}'
+        f"/{ingested_run.montage_digest}"
+        f'/ic002_func_smooth_axial.{ingested_run.montage_format}"'
+        in response.content.decode()
+    )
+
+
+# --- slice labels -------------------------------------------------------
+
+
+def test_component_page_labels_the_first_axial_slice(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    body = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/").content.decode()
+
+    # Assert: the montage is pixels only, so the label is the page's, placed
+    # at the top-left of the first cell
+    first = ingested_run.montage_picks["axial"][0]
+    assert f'<span class="slice-label" style="left: 0%; top: 0%">{first}</span>' in body
+
+
+def test_component_page_marks_the_sagittal_edges(logged_in, ingested_run: Run) -> None:
+    # Act
+    body = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/").content.decode()
+
+    # Assert
+    assert '<span class="edge-label edge-left">P</span>' in body
+
+
+def test_component_page_survives_a_run_without_slice_picks(
+    logged_in, ingested_run: Run
+) -> None:
+    # Arrange: a run rendered before the picks were recorded
+    ingested_run.montage_picks = {}
+    ingested_run.save(update_fields=["montage_picks"])
+
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert: no labels, rather than wrong ones or an error
+    assert (response.status_code, "data-axis-labels" in response.content.decode()) == (
+        200,
+        False,
+    )
+
+
+def test_component_page_offers_the_decision_guide(logged_in, ingested_run: Run) -> None:
+    # Act
+    body = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/").content.decode()
+
+    # Assert: beside the rating buttons
+    assert 'id="help-field-rating"' in body
+
+
+def test_rating_response_carries_the_decision_guide(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act: the swap replaces the whole rate bar, guide included
+    response = logged_in.post(
+        f"/runs/{ingested_run.pk}/ic/1/rate/", {"label": "Signal"}
+    )
+
+    # Assert
+    assert 'id="help-field-rating"' in response.content.decode()

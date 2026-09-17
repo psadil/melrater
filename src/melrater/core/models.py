@@ -75,6 +75,21 @@ class Run(models.Model):
     montage_backgrounds = models.JSONField(
         default=list, help_text="Montage backgrounds rendered for this run"
     )
+    # Which smoothing levels the overlay was rendered at, in display order,
+    # drawn from montage.SMOOTHINGS. Every render since the vocabulary existed
+    # writes both; the list is here, rather than assumed, so the montage count
+    # arithmetic and the page's switcher read what this run actually has —
+    # a run rendered before the smoothed variant declares `["raw"]`.
+    montage_smoothings = models.JSONField(
+        default=list, help_text="Overlay smoothing levels rendered for this run"
+    )
+    # The slice indices each axis' lightbox shows, in lightbox order
+    # (`{"axial": [3, 7, ...], ...}`). The montage image is pixels only; the
+    # page draws these over it as labels, positioned from their ordinal and
+    # montage.LIGHTBOX_COLS. A property of the render, like the two lists above.
+    montage_picks = models.JSONField(
+        default=dict, help_text="Slice indices shown per axis, in lightbox order"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     objects: ClassVar[RunManager] = RunManager()

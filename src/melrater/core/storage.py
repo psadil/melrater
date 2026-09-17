@@ -7,7 +7,7 @@ of being spelled out at every call site.
 
 The layout is content-addressed::
 
-    runs/<Run.uuid>/<Run.montage_digest>/ic007_axial.avif
+    runs/<Run.uuid>/<Run.montage_digest>/ic007_func_raw_axial.avif
 
 ``uuid`` rather than a primary key because a run loaded into another database
 gets a fresh id and its images have to survive that. ``digest`` — a fingerprint
@@ -50,7 +50,7 @@ def save(name: str, data: bytes) -> None:
     """Write ``data`` at ``name``, replacing anything already there.
 
     ``Storage.save`` on its own would *rename* around a collision
-    (``ic001_axial_a8Fk2p.avif``), which would leave a re-pushed run serving
+    (``ic001_func_raw_axial_a8Fk2p.avif``), which would leave a re-pushed run serving
     its old images forever.
     """
     storage = montage_storage()

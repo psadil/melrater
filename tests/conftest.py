@@ -204,7 +204,7 @@ def bare_runs(db):
     """Make Run+Component rows directly, with no montage rendering.
 
     Enough for query-count and run-list tests, and orders of magnitude cheaper
-    than ingesting: `ingested_run` renders nine images.
+    than ingesting: `ingested_run` renders eighteen images.
     """
     from melrater.core.models import Component, Run
 

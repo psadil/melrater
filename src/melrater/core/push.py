@@ -18,8 +18,8 @@ from typing import Any
 
 import httpx
 
-#: Generous, because a request carries ~20 MB of montages over a domestic
-#: uplink and the server hashes every one of them on arrival.
+#: Generous, because a request carries tens of megabytes of montages over a
+#: domestic uplink and the server hashes every one of them on arrival.
 DEFAULT_TIMEOUT = 300.0
 RETRIES = 3
 BACKOFF = 2.0

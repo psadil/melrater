@@ -1,3 +1,4 @@
+import nibabel as nib
 import numpy as np
 import pytest
 
@@ -105,20 +106,62 @@ def test_display_points_match_the_overlay_grid() -> None:
     assert np.array_equal(plane, vol[index[..., 0], index[..., 1], index[..., 2]])
 
 
-def test_display_plane_replicates_pixels_at_the_default_factor() -> None:
+def test_display_plane_replicates_pixels_at_an_integer_factor() -> None:
+    # Arrange
+    vol = np.arange(24, dtype="float32").reshape(2, 3, 4)
+
+    # Act
+    plane = montage.display_plane(vol, axis=2, idx=0, factor=2)
+
+    # Assert: the plain nearest-neighbour upscale the montage used to bake in
+    expected = np.repeat(
+        np.repeat(vol[:, :, 0].swapaxes(0, 1)[::-1], 2, axis=0), 2, axis=1
+    )
+    assert np.array_equal(plane, expected)
+
+
+def test_display_plane_is_the_voxel_grid_at_the_default_factor() -> None:
     # Arrange
     vol = np.arange(24, dtype="float32").reshape(2, 3, 4)
 
     # Act
     plane = montage.display_plane(vol, axis=2, idx=0)
 
-    # Assert: unchanged from the montage's long-standing nearest upscale
-    expected = np.repeat(
-        np.repeat(vol[:, :, 0].swapaxes(0, 1)[::-1], montage.UPSCALE, axis=0),
-        montage.UPSCALE,
-        axis=1,
+    # Assert: montages are encoded at voxel resolution; the browser upscales
+    assert np.array_equal(plane, vol[:, :, 0].swapaxes(0, 1)[::-1])
+
+
+def test_render_lightbox_tiles_cells_with_no_gap() -> None:
+    # Arrange: two flat cells, told apart by their gray level
+    bg = [np.full((3, 4), 10, dtype=np.uint8), np.full((3, 4), 20, dtype=np.uint8)]
+    ov = [np.zeros((3, 4)), np.zeros((3, 4))]
+
+    # Act
+    img = np.asarray(montage.render_lightbox(bg, ov, cols=2))
+
+    # Assert: the second cell starts exactly where the first ends, which is
+    # what lets the page place a label at (col / cols, row / rows)
+    assert (img.shape, tuple(img[0, 4])) == ((3, 8, 3), (20, 20, 20))
+
+
+def test_canonical_zooms_follow_the_reoriented_axes() -> None:
+    # Arrange: array axis 0 runs along world y at 1 mm, axis 1 along world x
+    # at 2 mm, so the canonical (RAS) array swaps them
+    affine = np.array(
+        [
+            [0.0, 2.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 3.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
     )
-    assert np.array_equal(plane, expected)
+    img = nib.nifti1.Nifti1Image(np.zeros((4, 5, 6), dtype="float32"), affine)
+
+    # Act
+    zooms = montage.canonical_zooms(img)
+
+    # Assert: a kernel in millimetres has to know which array axis is which
+    assert np.allclose(zooms, (2.0, 1.0, 3.0))
 
 
 def test_gray_planes_span_the_full_byte_range() -> None:
@@ -135,4 +178,9 @@ def test_gray_planes_span_the_full_byte_range() -> None:
 def test_montage_count_counts_every_background_and_axis() -> None:
     # Assert: the single home for the arithmetic the tar cap and the ingest
     # API's set check both read
-    assert montage.montage_count(2, ("func",)) == 6
+    assert montage.montage_count(2, ("func",), ("raw",)) == 6
+
+
+def test_montage_count_counts_every_smoothing_level() -> None:
+    # Assert
+    assert montage.montage_count(2, ("func",), ("raw", "smooth")) == 12

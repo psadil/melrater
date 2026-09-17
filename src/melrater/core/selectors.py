@@ -48,6 +48,89 @@ def background_buttons(run: Run) -> list[dict[str, str]]:
     ]
 
 
+#: Display order of the overlay smoothing levels, and what to call them. Same
+#: arrangement as the backgrounds: the stored keys are in every filename.
+SMOOTHING_ORDER = ("raw", "smooth")
+SMOOTHING_LABELS = {"raw": "unsmoothed", "smooth": "smoothed"}
+
+
+def smoothing_buttons(run: Run) -> list[dict[str, str]]:
+    """This run's smoothing levels as ``{key, label}``, in display order."""
+    have = set(run.montage_smoothings)
+    return [
+        {"key": smoothing, "label": SMOOTHING_LABELS[smoothing]}
+        for smoothing in SMOOTHING_ORDER
+        if smoothing in have
+    ]
+
+
+#: The two edge marks drawn at the bottom of a lightbox's first cell, per
+#: display axis: axial and coronal are neurological (subject left on the left),
+#: sagittal puts posterior on the left.
+EDGE_LABELS = {"axial": ("L", "R"), "coronal": ("L", "R"), "sagittal": ("P", "A")}
+
+
+@dataclass(frozen=True)
+class CellLabel:
+    """One slice-index label and where it sits on the montage."""
+
+    index: int
+    left: str  # CSS percentage of the montage's width
+    top: str  # CSS percentage of the montage's height
+
+
+@dataclass(frozen=True)
+class AxisLabels:
+    """Everything the page draws over one axis' lightbox."""
+
+    axis: str
+    cols: int
+    rows: int
+    cells: list[CellLabel]
+    edge_left: str
+    edge_right: str
+
+
+def _percent(part: int, whole: int) -> str:
+    return f"{part / whole * 100:.4g}%"
+
+
+def slice_labels(run: Run) -> dict[str, AxisLabels]:
+    """Where each slice label goes, per axis, as CSS percentages.
+
+    The lightbox tiles its cells with no gap, so cell ``i`` starts at
+    ``(i % cols) / cols`` of the width and ``(i // cols) / rows`` of the height
+    whatever the image's pixel size — which is what lets one label layer serve
+    both backgrounds and both smoothing levels, and stay sharp however the
+    browser scales the image. Axes the run has no picks for (rendered before
+    picks were recorded) get no labels rather than wrong ones.
+    """
+    cols = montage.LIGHTBOX_COLS
+    labels: dict[str, AxisLabels] = {}
+    for axis in AXIS_ORDER:
+        indices = [int(i) for i in run.montage_picks.get(axis, [])]
+        if not indices:
+            continue
+        rows = -(-len(indices) // cols)
+        left, right = EDGE_LABELS[axis]
+        labels[axis] = AxisLabels(
+            axis=axis,
+            cols=cols,
+            rows=rows,
+            cells=[
+                CellLabel(
+                    index=index,
+                    left=_percent(i % cols, cols),
+                    top=_percent(i // cols, rows),
+                )
+                for i, index in enumerate(indices)
+            ],
+            edge_left=left,
+            edge_right=right,
+        )
+    return labels
+
+
 #: Runs per page of the run list.
 RUNS_PER_PAGE = 50
 
@@ -300,7 +383,9 @@ def prob_entries_for_run(
     return entries, (thr / 100.0) if thr is not None else None
 
 
-def montage_url(run: Run, index: int, background: str, axis: str) -> str:
+def montage_url(
+    run: Run, index: int, background: str, smoothing: str, axis: str
+) -> str:
     """URL of one rendered montage.
 
     The run's montage digest is part of the path, so a re-render mints new
@@ -310,26 +395,74 @@ def montage_url(run: Run, index: int, background: str, axis: str) -> str:
     """
     name = montage_store.run_prefix(
         run.uuid, str(run.montage_digest)
-    ) + montage.montage_name(index, background, axis, str(run.montage_format))
+    ) + montage.montage_name(
+        index, background, smoothing, axis, str(run.montage_format)
+    )
     return montage_store.url(name)
 
 
-def montage_urls(component: Component) -> dict[str, dict[str, str]]:
-    """``{background: {axis: url}}``, for the backgrounds this run has.
+def montage_urls(component: Component) -> dict[str, dict[str, dict[str, str]]]:
+    """``{background: {smoothing: {axis: url}}}``, for what this run has.
 
     Filtered rather than exhaustive: an unregistered run has no anatomical
-    montages, and offering their URLs would put six broken images on the page.
+    montages, and a run rendered before the smoothed variant has none of
+    those; offering their URLs would put a screen of broken images on the page.
     """
     run = component.run
-    have = set(run.montage_backgrounds)
+    backgrounds = set(run.montage_backgrounds)
+    smoothings = set(run.montage_smoothings)
     return {
         background: {
-            axis: montage_url(run, component.index, background, axis)
-            for axis in AXIS_ORDER
+            smoothing: {
+                axis: montage_url(run, component.index, background, smoothing, axis)
+                for axis in AXIS_ORDER
+            }
+            for smoothing in SMOOTHING_ORDER
+            if smoothing in smoothings
         }
         for background in BACKGROUND_ORDER
-        if background in have
+        if background in backgrounds
     }
+
+
+@dataclass(frozen=True)
+class MontageImage:
+    background: str
+    smoothing: str
+    url: str
+
+
+@dataclass(frozen=True)
+class MontageFrame:
+    """One axis' images and its label layer, as the template lays them out."""
+
+    axis: str
+    images: list[MontageImage]
+    labels: AxisLabels | None
+
+
+def montage_frames(component: Component) -> list[MontageFrame]:
+    """``montage_urls`` regrouped by axis, which is how the page nests them.
+
+    One frame per axis holds every background x smoothing image for that axis
+    and the one label layer they share; the page shows one frame and, within
+    it, one image at a time.
+    """
+    urls = montage_urls(component)
+    labels = slice_labels(component.run)
+    return [
+        MontageFrame(
+            axis=axis,
+            images=[
+                MontageImage(background=background, smoothing=smoothing, url=url)
+                for background, by_smoothing in urls.items()
+                for smoothing, by_axis in by_smoothing.items()
+                for url in (by_axis[axis],)
+            ],
+            labels=labels.get(axis),
+        )
+        for axis in AXIS_ORDER
+    ]
 
 
 def user_label_for_component(
@@ -389,6 +522,10 @@ def run_payload(run: Run) -> RunPayload:
         montage_format=montage_format,
         montage_digest=str(run.montage_digest),
         backgrounds=tuple(run.montage_backgrounds),
+        smoothings=tuple(run.montage_smoothings),
+        picks={
+            axis: [int(i) for i in picks] for axis, picks in run.montage_picks.items()
+        },
         components=components,
         fix=_fix_payloads(run),
     )

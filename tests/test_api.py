@@ -174,8 +174,20 @@ def test_push_stores_every_montage(
     # Assert: under the uuid and the content digest, where montage_url looks
     stored = media_root / "runs" / str(payload.uuid) / payload.montage_digest
     assert len(list(stored.iterdir())) == montage.montage_count(
-        N_COMPONENTS, payload.backgrounds
+        N_COMPONENTS, payload.backgrounds, payload.smoothings
     )
+
+
+def test_push_stores_the_slice_picks(client, ingest_auth, push_bundle) -> None:
+    # Arrange
+    bundle = _as_new_run(push_bundle)
+    payload = RunPayload.model_validate_json(bundle[0])
+
+    # Act
+    _post(client, bundle, ingest_auth)
+
+    # Assert: the labels the page draws travel with the montages
+    assert Run.objects.get(uuid=payload.uuid).montage_picks == payload.picks
 
 
 @pytest.fixture
@@ -196,7 +208,7 @@ def test_pushed_montage_is_served_by_the_media_view(
     # Act: close the loop — what was pushed is what reviewers load
     response = logged_in.get(
         f"/media/runs/{payload.uuid}/{payload.montage_digest}"
-        f"/ic001_func_axial.{payload.montage_format}"
+        f"/ic001_func_raw_axial.{payload.montage_format}"
     )
 
     # Assert
@@ -361,6 +373,58 @@ def test_push_leaves_no_montages_when_the_montages_are_refused(
 
     # Assert
     assert not (media_root / "runs" / str(uuid)).exists()
+
+
+def test_push_refuses_smoothings_without_the_raw_level(
+    client, ingest_auth, push_bundle
+) -> None:
+    # Arrange: every run has the unsmoothed map, so a list without it is a
+    # client with a bug rather than a run with a choice
+    payload = RunPayload.model_validate_json(push_bundle[0])
+    payload = payload.model_copy(update={"smoothings": ("smooth",)})
+
+    # Act
+    response = _post(
+        client,
+        _as_new_run((payload.model_dump_json().encode(), push_bundle[1])),
+        ingest_auth,
+    )
+
+    # Assert
+    assert response.status_code == 409
+
+
+def test_push_refuses_slice_picks_for_an_unknown_axis(
+    client, ingest_auth, push_bundle
+) -> None:
+    # Arrange
+    payload = RunPayload.model_validate_json(push_bundle[0])
+    payload = payload.model_copy(update={"picks": {"oblique": [1, 2]}})
+
+    # Act
+    response = _post(
+        client,
+        _as_new_run((payload.model_dump_json().encode(), push_bundle[1])),
+        ingest_auth,
+    )
+
+    # Assert
+    assert response.status_code == 409
+
+
+def test_payload_without_smoothings_or_picks_still_validates(push_bundle) -> None:
+    # Arrange: a payload written before either field existed
+    import json
+
+    data = json.loads(push_bundle[0])
+    del data["smoothings"], data["picks"]
+
+    # Act
+    payload = RunPayload.model_validate(data)
+
+    # Assert: the raw level alone, and no labels — its old-style montage names
+    # are what the tar reader then refuses
+    assert (payload.smoothings, payload.picks) == (("raw",), {})
 
 
 def test_push_refuses_a_tar_over_the_size_cap(

@@ -37,7 +37,9 @@ def test_axis_button_switches_montage(
 
     # Assert: expect() retries — this montage has no src until it is switched
     # to, and an img with height:auto has no box until it has loaded
-    expect(logged_in_page.locator('img[data-axis-img="coronal"]')).to_be_visible()
+    expect(
+        logged_in_page.locator('img[data-sm-img="raw"][data-axis-img="coronal"]')
+    ).to_be_visible()
 
 
 def test_arrow_key_navigates_to_next_component(
@@ -67,7 +69,9 @@ def test_axis_choice_persists_across_navigation(
     logged_in_page.wait_for_url("**/ic/2/")
 
     # Assert
-    expect(logged_in_page.locator('img[data-axis-img="coronal"]')).to_be_visible()
+    expect(
+        logged_in_page.locator('img[data-sm-img="raw"][data-axis-img="coronal"]')
+    ).to_be_visible()
 
 
 def test_component_page_loads_one_montage(
@@ -87,7 +91,7 @@ def test_component_page_loads_one_montage(
     logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
     logged_in_page.wait_for_load_state("networkidle")
 
-    # Assert: two of the three axes wait behind data-src until switched to
+    # Assert: the other eleven variants wait behind data-src until switched to
     assert len(requested) == 1
 
 
@@ -196,7 +200,9 @@ def test_background_hotkey_swaps_the_montage(
 
     # Assert: expect() retries — the anatomical has no src until first shown
     expect(
-        logged_in_anat_page.locator('img[data-bg-img="anat"][data-axis-img="axial"]')
+        logged_in_anat_page.locator(
+            'img[data-bg-img="anat"][data-sm-img="raw"][data-axis-img="axial"]'
+        )
     ).to_be_visible()
 
 
@@ -215,7 +221,9 @@ def test_background_choice_persists_across_navigation(
 
     # Assert
     expect(
-        logged_in_anat_page.locator('img[data-bg-img="anat"][data-axis-img="axial"]')
+        logged_in_anat_page.locator(
+            'img[data-bg-img="anat"][data-sm-img="raw"][data-axis-img="axial"]'
+        )
     ).to_be_visible()
 
 
@@ -232,7 +240,9 @@ def test_background_hotkey_keeps_the_chosen_axis(
 
     # Assert
     expect(
-        logged_in_anat_page.locator('img[data-bg-img="anat"][data-axis-img="coronal"]')
+        logged_in_anat_page.locator(
+            'img[data-bg-img="anat"][data-sm-img="raw"][data-axis-img="coronal"]'
+        )
     ).to_be_visible()
 
 
@@ -250,3 +260,103 @@ def test_the_browser_decodes_the_montage_codec(
 
     # Assert: naturalWidth is 0 for an image the browser could not decode
     assert montage.evaluate("img => img.naturalWidth") > 0
+
+
+def test_smoothing_hotkey_swaps_the_montage(
+    logged_in_page, live_server, ingested_run: Run
+) -> None:
+    # Arrange
+    logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
+
+    # Act
+    logged_in_page.keyboard.press("m")
+
+    # Assert: expect() retries — the smoothed map has no src until first shown
+    expect(
+        logged_in_page.locator('img[data-sm-img="smooth"][data-axis-img="axial"]')
+    ).to_be_visible()
+
+
+def test_smoothing_choice_persists_across_navigation(
+    logged_in_page, live_server, ingested_run: Run
+) -> None:
+    # Arrange: the hotkey goes through the button's click, so it fires htmx's
+    # preference POST exactly as clicking does
+    logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
+    with logged_in_page.expect_response("**/prefs/smoothing/"):
+        logged_in_page.keyboard.press("m")
+
+    # Act
+    logged_in_page.keyboard.press("ArrowRight")
+    logged_in_page.wait_for_url("**/ic/2/")
+
+    # Assert
+    expect(
+        logged_in_page.locator('img[data-sm-img="smooth"][data-axis-img="axial"]')
+    ).to_be_visible()
+
+
+def test_smoothing_hotkey_keeps_the_chosen_axis_and_background(
+    logged_in_anat_page, live_server, anat_ingested_run
+) -> None:
+    # Arrange: a non-default axis and background first
+    logged_in_anat_page.goto(f"{live_server.url}/runs/{anat_ingested_run.pk}/ic/1/")
+    with logged_in_anat_page.expect_response("**/prefs/axis/"):
+        logged_in_anat_page.click('[data-axis-btn="coronal"]')
+    with logged_in_anat_page.expect_response("**/prefs/background/"):
+        logged_in_anat_page.keyboard.press("b")
+
+    # Act: the three choices are independent
+    logged_in_anat_page.keyboard.press("m")
+
+    # Assert
+    expect(
+        logged_in_anat_page.locator(
+            'img[data-bg-img="anat"][data-sm-img="smooth"][data-axis-img="coronal"]'
+        )
+    ).to_be_visible()
+
+
+def test_axis_hotkey_cycles_the_plane(
+    logged_in_page, live_server, ingested_run: Run
+) -> None:
+    # Arrange
+    logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
+
+    # Act: "change plane" is a first-class tip, so it has a key
+    logged_in_page.keyboard.press("o")
+
+    # Assert: the coronal frame, labels included, is what shows
+    expect(logged_in_page.locator('[data-axis-labels="coronal"]')).to_be_visible()
+
+
+def test_the_functional_montage_is_the_voxel_grid(
+    logged_in_page, live_server, ingested_run: Run
+) -> None:
+    # Arrange: montages are encoded at voxel resolution and upscaled by the
+    # browser; the synthetic volume is 6 voxels wide and the lightbox 5 wide
+    logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
+    montage = logged_in_page.locator('img[data-axis-img="axial"].active')
+    expect(montage).to_be_visible()
+
+    # Act
+    width = montage.evaluate("img => img.naturalWidth")
+
+    # Assert
+    assert width == 5 * 6
+
+
+def test_the_frame_is_pinned_to_twice_the_voxel_grid(
+    logged_in_page, live_server, ingested_run: Run
+) -> None:
+    # Arrange
+    logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
+    montage = logged_in_page.locator('img[data-axis-img="axial"].active')
+    expect(montage).to_be_visible()
+
+    # Act: on a wide window the frame is exactly 2x, so the nearest-neighbour
+    # upscale lands on whole pixels
+    width = logged_in_page.locator('[data-axis-frame="axial"]').bounding_box()["width"]
+
+    # Assert
+    assert width == 2 * 5 * 6

@@ -45,6 +45,10 @@ url = "https://doi.org/10.1002/mrm.1910340111"
 text = "Taylor et al. (2025), Go Figure"
 url = "https://doi.org/10.52294/001c.125391"
 
+[refs.griffanti2017]
+text = "Griffanti et al. (2017), Hand classification of fMRI ICA noise components, NeuroImage 154:188-205"
+url = "https://doi.org/10.1016/j.neuroimage.2016.12.036"
+
 
 # --- figures --------------------------------------------------------------
 
@@ -57,13 +61,33 @@ weak voxels fade out rather than disappearing, so you can see what is not \
 there as well as what is."""
 bullets = [
   "opacity rises as (|z| / 3)-squared, and is fully opaque above |z| = 3",
-  "red through yellow for positive z, blue through light blue for negative, saturating at |z| = 10",
+  "red through yellow for positive z, blue through light blue for negative, saturating at |z| = 10; the colour is the magnitude, so a yellow (or light blue) spot is a peak",
   "the number in each panel is that panel's voxel slice index",
   "axial and coronal are neurological: the subject's left is on the left of the image",
   "sagittal panels put posterior on the left, anterior on the right",
-  "press b to swap between the mean functional and the anatomical, on a run that has both",
+  "press o to cycle the plane: a real cluster follows the grey matter in every plane, the sagittal sinus shows best sagittally, the cerebral arteries axially, and a multiband artefact as stripes in the coronal or sagittal plane",
+  "press b to swap between the mean functional and the anatomical, on a run that has both: the functional for dropout, the brain edge and anything EPI-specific, the anatomical for grey matter, deep nuclei and the cerebellum",
+  "press m to swap between the unsmoothed map and a smoothed one: unsmoothed for stripes, checkerboards and where a peak sits, smoothed for the overall shape",
 ]
-refs = ["gofigure"]
+refs = ["gofigure", "griffanti2017"]
+
+[chart.montage_smooth]
+title = "smoothed map"
+body = """
+The same z-map smoothed with a 9.4 mm FWHM Gaussian inside the brain mask, the \
+kernel Griffanti et al. used to display components, then rescaled so the bulk \
+of the map is unit scale again. Scattered single voxels average away and a \
+spatially coherent pattern survives, so this is the view for the first question \
+about any component: a low number of large clusters, or a large number of small \
+ones."""
+bullets = [
+  "the rescaling is per component, so read cluster count, size and placement rather than absolute colour",
+  "smoothed is where a network's shape, a vein running along the sinus, CSF pulsation in the ventricles, or a subependymal-vein pattern spreading into white matter is easiest to see",
+  "unsmoothed is where a multiband checkerboard, alternating positive and negative stripes, the tightly mixed signs of a susceptibility artefact, and the exact voxel a peak sits in are visible; smoothing hides all four",
+  "a map that smooths to almost nothing had no coherent structure to begin with",
+  "press m to swap; the choice is kept across components",
+]
+refs = ["griffanti2017"]
 
 [chart.montage_anat]
 title = "anatomical background"
@@ -76,6 +100,7 @@ bullets = [
   "that registration is a linear (affine) fit, and nothing here models EPI susceptibility distortion, so orbitofrontal, temporal-pole and sinus-adjacent voxels can be several millimetres out",
   "judge a component that hugs the brain edge, a sinus or a ventricle on the functional background, which has the true EPI geometry",
   "the slice numbers are the functional volume's own indices, so they mean the same thing on both backgrounds",
+  "the smoothed map (m) is easiest to read here: whether a large cluster follows the grey matter, or sits in white matter, CSF or a vessel",
   "press b to swap backgrounds",
 ]
 refs = ["jenkinson2002", "jezzard1995"]
@@ -137,6 +162,24 @@ bullets = [
 
 
 # --- single values --------------------------------------------------------
+
+[field.rating]
+title = "how to decide"
+body = """
+Griffanti et al.'s procedure, in order: the spatial map first and foremost, \
+then the time series, then the power spectrum. Signal only if all three pass; \
+noise if any one shows a clear artefact; unknown when the evidence is mixed or \
+thin. When in doubt, keep it: a component is innocent until proven guilty, and \
+removing signal costs a study more than leaving a little noise in."""
+bullets = [
+  "spatial map, signal: a low number of large clusters with their peaks in grey matter, away from vessels, white matter, CSF and the edge of the field of view. Noise: a ring or crescent at the brain edge, clusters along a vessel or in CSF or white matter, alternating slices, alternating positive and negative stripes, or overlap with EPI signal dropout",
+  "time series, signal: fairly regular and oscillatory. Noise: sudden jumps, or a sudden change of oscillation pattern, especially where FD spikes (motion or MR-related)",
+  "power spectrum, signal: mostly low frequency, with at least one strong peak inside 0.01-0.1 Hz. Noise: mostly high frequency, or spread evenly across all frequencies",
+  "unknown is for a clear mix of signal and noise, or a map that is neither clearly one nor the other; it stays in the data",
+  "expect far more noise than signal: around 70% of components on a standard 3T sequence, 88-90% with multiband acceleration",
+  "look-alikes: sagittal sinus versus visual cortex, check the sagittal plane and whether the peak is inside the grey matter; arteries versus insula, check the spectrum, arteries carry high frequency; susceptibility versus orbitofrontal cortex, check the functional background for dropout under the cluster and whether the timecourse follows FD",
+]
+refs = ["griffanti2017"]
 
 [field.fix_verdict]
 title = "FIX verdict"

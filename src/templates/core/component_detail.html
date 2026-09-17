@@ -33,11 +33,12 @@
   </div>
 
   <div class="brain">
-    <div class="axis-btns">
+    <div class="montage-btns">
       {% for axis in axes %}
         <button class="axis-btn{% if axis == active_axis %} active{% endif %}" data-axis-btn="{{ axis }}"
                 hx-post="{% url 'set-axis' %}" hx-vals='{"axis": "{{ axis }}"}' hx-swap="none">{{ axis }}</button>
       {% endfor %}
+      <kbd class="btn-key">o</kbd>
       {% if background_buttons|length > 1 %}
         <span class="btn-sep"></span>
         {% for bg in background_buttons %}
@@ -46,19 +47,42 @@
         {% endfor %}
         <kbd class="btn-key">b</kbd>
       {% endif %}
+      {% if smoothing_buttons|length > 1 %}
+        <span class="btn-sep"></span>
+        {% for sm in smoothing_buttons %}
+          <button class="sm-btn{% if sm.key == active_smoothing %} active{% endif %}" data-sm-btn="{{ sm.key }}"
+                  hx-post="{% url 'set-smoothing' %}" hx-vals='{"smoothing": "{{ sm.key }}"}' hx-swap="none">{{ sm.label }}</button>
+        {% endfor %}
+        <kbd class="btn-key">m</kbd>
+      {% endif %}
     </div>
     {% comment %}
-      Only the visible background+axis is fetched; melrater.js promotes
-      data-src on the first switch, which cuts the page from six montages
-      (~600 kB on a registered run) to one.
+      One frame per axis; inside it, one image per background x smoothing and
+      the label layer they all share. Only the visible variant is fetched:
+      melrater.js promotes data-src on the first switch, which cuts the page
+      from twelve montages (~800 kB on a registered run) to one. The montage
+      is pixels only; the slice numbers and edge marks are these spans,
+      positioned as fractions of the image (the cells tile with no gap).
       {# ... #} is single-line only, so a multi-line note has to be this tag.
     {% endcomment %}
-    {% for bg, axis_urls in montages.items %}{% for axis, url in axis_urls.items %}
-      <img class="montage{% if axis == active_axis and bg == active_background %} active{% endif %}"
-           data-bg-img="{{ bg }}" data-axis-img="{{ axis }}"
-           {% if axis == active_axis and bg == active_background %}src="{{ url }}"{% else %}data-src="{{ url }}"{% endif %}
-           alt="{{ bg }} {{ axis }} lightbox">
-    {% endfor %}{% endfor %}
+    {% for frame in montage_frames %}
+      <div class="montage-frame{% if frame.axis == active_axis %} active{% endif %}" data-axis-frame="{{ frame.axis }}">
+        {% for img in frame.images %}
+          <img class="montage{% if frame.axis == active_axis and img.background == active_background and img.smoothing == active_smoothing %} active{% endif %}"
+               data-bg-img="{{ img.background }}" data-sm-img="{{ img.smoothing }}" data-axis-img="{{ frame.axis }}"
+               {% if frame.axis == active_axis and img.background == active_background and img.smoothing == active_smoothing %}src="{{ img.url }}"{% else %}data-src="{{ img.url }}"{% endif %}
+               alt="{{ img.background }} {{ img.smoothing }} {{ frame.axis }} lightbox">
+        {% endfor %}
+        {% if frame.labels %}
+          <div class="slice-labels" data-axis-labels="{{ frame.axis }}"
+               style="--cols: {{ frame.labels.cols }}; --rows: {{ frame.labels.rows }}">
+            {% for cell in frame.labels.cells %}<span class="slice-label" style="left: {{ cell.left }}; top: {{ cell.top }}">{{ cell.index }}</span>{% endfor %}
+            <span class="edge-label edge-left">{{ frame.labels.edge_left }}</span>
+            <span class="edge-label edge-right">{{ frame.labels.edge_right }}</span>
+          </div>
+        {% endif %}
+      </div>
+    {% endfor %}
     <div class="montage-caption{% if active_background == 'func' %} active{% endif %}" data-bg-caption="func">
       unthresholded: opacity &prop; (|z|/3)&sup2;, opaque above |z| = 3 ·
       red-yellow +, blue-lightblue &minus; (saturating at |z| = 10) ·
@@ -69,6 +93,12 @@
         the same z-map over this subject's T1, through FEAT's <em>linear</em> EPI&rarr;T1 registration ·
         sharper, but it does not model EPI susceptibility distortion &mdash; judge edge, sinus and
         ventricle components on the <span class="nobr">functional{% help_bubble "chart.montage_anat" %}</span></div>
+    {% endif %}
+    {% if 'smooth' in smoothings %}
+      <div class="montage-caption{% if active_smoothing == 'smooth' %} active{% endif %}" data-sm-caption="smooth">
+        smoothed: Gaussian FWHM 9.4 mm within the brain mask, then rescaled so the bulk of the map is unit
+        scale again &mdash; judge cluster count, size and placement, not absolute colour · scattered voxels
+        average away, a coherent pattern <span class="nobr">survives{% help_bubble "chart.montage_smooth" %}</span></div>
     {% endif %}
   </div>
 

@@ -40,13 +40,15 @@ task's own env, where it wins.
   `api.py` (the [django-ninja](https://django-ninja.dev) ingest endpoints) is
   thin in exactly the same way, and `push.py` is its client — Django-free, so
   its tests need only `httpx.MockTransport`. Domain logic (`melodic.py`,
-  `metrics.py`, `montage.py`, `charts.py`, `transfer.py`, `resample.py`) is
-  Django-free and fully typed. `resample.py` is the one module the deployment
-  does not carry the dependencies for — it needs scipy, which lives in the
-  `render` pixi feature rather than in the container image, because rendering
-  only ever happens where the niftis are. `services.py` therefore imports it
-  inside `_staged_render` rather than at module scope, so importing `services`
-  on the server still works. `lake.py` is the one module that talks to a
+  `metrics.py`, `montage.py`, `charts.py`, `transfer.py`, `resample.py`,
+  `smooth.py`) is Django-free and fully typed. `resample.py` and `smooth.py`
+  are the two modules the deployment does not carry the dependencies for —
+  they need scipy, which lives in the `render` pixi feature rather than in the
+  container image, because rendering only ever happens where the niftis are.
+  `services.py` therefore imports `resample` inside `_staged_render`, and
+  `montage._render_one` imports `smooth` inside the render worker, rather than
+  at module scope, so importing `services` on the server still works.
+  `lake.py` is the one module that talks to a
   [bidslake](https://github.com/psadil/bidslake) catalog — it resolves which
   files belong to which run and hands `melodic.py` plain paths/arrays; a role
   that resolves to anything but exactly one file is reported, never guessed.
@@ -85,7 +87,7 @@ task's own env, where it wins.
 - **Montage files** are ordinary Django media under `MEDIA_ROOT`: written
   through `default_storage`, served by the login-required view in
   `config/urls.py`. `melrater/core/storage.py` owns nothing but their
-  *layout*, `runs/<Run.uuid>/<Run.montage_digest>/ic007_func_axial.avif`. The uuid
+  *layout*, `runs/<Run.uuid>/<Run.montage_digest>/ic007_func_raw_axial.avif`. The uuid
   because a run loaded into another database gets a fresh primary key and its
   images have to survive that; the digest — a fingerprint of the rendered
   bytes — because it makes a re-render additive rather than destructive, which
@@ -96,8 +98,9 @@ task's own env, where it wins.
   into a plain temporary directory that `storage.store_directory` ingests.
 - **A montage name is rebuilt, never accepted.** Everything arriving from
   outside goes through `montage.parse_montage_name` and back out through
-  `montage.montage_name`, from a parsed integer, a `BACKGROUNDS` key, an
-  `AXES` key, and a format sniffed from the bytes — so no string a client chose reaches a storage path.
+  `montage.montage_name`, from a parsed integer, a `BACKGROUNDS` key, a
+  `SMOOTHINGS` key, an `AXES` key, and a format sniffed from the bytes — so no
+  string a client chose reaches a storage path.
   Keep that pair adjacent in `montage.py` so they cannot drift, and note the
   `\Z` in the pattern: `$` also matches before a trailing newline.
 - **Transferring runs between databases** is the ingest API: `push_runs` sends

@@ -20,7 +20,7 @@ from melrater.core import charts, selectors, services
 from melrater.core import help as help_catalog
 from melrater.core.metrics import OUTLIER_Z, family_of
 from melrater.core.models import Component, Run
-from melrater.core.montage import AXES, BACKGROUNDS
+from melrater.core.montage import AXES, BACKGROUNDS, SMOOTHINGS
 from melrater.core.schemas import ComponentData, RunData
 
 RATING_BUTTONS = [
@@ -34,6 +34,9 @@ DEFAULT_AXIS = "axial"
 
 BACKGROUND_SESSION_KEY = "montage_background"
 DEFAULT_BACKGROUND = "func"
+
+SMOOTHING_SESSION_KEY = "montage_smoothing"
+DEFAULT_SMOOTHING = "raw"
 
 # A montage URL contains the run's montage digest, so the bytes behind one
 # never change — a re-render mints new URLs. That makes them safely immutable,
@@ -183,10 +186,12 @@ def _component_context(run: Run, component: Component, user: AbstractBaseUser) -
         "next_index": next_index,
         "next_unrated": next((i for i in unrated_after if i > index), None)
         or (unrated_after[0] if unrated_after else None),
-        "montages": selectors.montage_urls(component),
+        "montage_frames": selectors.montage_frames(component),
         "axes": selectors.AXIS_ORDER,
         "backgrounds": list(run.montage_backgrounds),
         "background_buttons": selectors.background_buttons(run),
+        "smoothings": list(run.montage_smoothings),
+        "smoothing_buttons": selectors.smoothing_buttons(run),
         "fix_rows": selectors.fix_verdicts_for_component(component),
         "prob_strip": prob_strip,
         "user_label": user_labels.get(index),
@@ -223,6 +228,18 @@ def _active_background(request: HttpRequest, run: Run) -> str:
     return choice if choice in available else DEFAULT_BACKGROUND
 
 
+def _active_smoothing(request: HttpRequest, run: Run) -> str:
+    """The chosen smoothing level, clamped to what this run has.
+
+    Run-aware like `_active_background`: a run rendered before the smoothed
+    variant declares `["raw"]` alone, and a reviewer whose preference is
+    `smooth` lands on the unsmoothed map there rather than on a broken image.
+    """
+    choice = request.session.get(SMOOTHING_SESSION_KEY, DEFAULT_SMOOTHING)
+    available = list(run.montage_smoothings) or [DEFAULT_SMOOTHING]
+    return choice if choice in available else DEFAULT_SMOOTHING
+
+
 @login_required
 def component_detail(request: HttpRequest, run_id: int, index: int) -> HttpResponse:
     run = get_object_or_404(Run, pk=run_id)
@@ -230,14 +247,18 @@ def component_detail(request: HttpRequest, run_id: int, index: int) -> HttpRespo
     context = _component_context(run, component, _authed_user(request))
     axis = _active_axis(request)
     background = _active_background(request, run)
+    smoothing = _active_smoothing(request, run)
     context["active_axis"] = axis
     context["active_background"] = background
+    context["active_smoothing"] = smoothing
     # Warm the next component's montage while this one is being judged. Only
-    # the visible axis: the other two are not fetched for this component
+    # the visible variant: the others are not fetched for this component
     # either (the template gives them data-src, not src).
     next_index = context["next_index"]
     context["prefetch_url"] = (
-        selectors.montage_url(run, next_index, background, axis) if next_index else None
+        selectors.montage_url(run, next_index, background, smoothing, axis)
+        if next_index
+        else None
     )
     return render(request, "core/component_detail.html", context)
 
@@ -275,6 +296,19 @@ def set_background(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @require_http_methods(["POST"])
+def set_smoothing(request: HttpRequest) -> HttpResponse:
+    """Persist the overlay-smoothing choice, as `set_background` does the background."""
+    smoothing = request.POST.get("smoothing", "")
+    if smoothing not in SMOOTHINGS:
+        return HttpResponseBadRequest(
+            f"invalid smoothing: {smoothing!r}", content_type="text/plain"
+        )
+    request.session[SMOOTHING_SESSION_KEY] = smoothing
+    return HttpResponse(status=204)
+
+
+@login_required
+@require_http_methods(["POST"])
 def component_rate(request: HttpRequest, run_id: int, index: int) -> HttpResponse:
     user = _authed_user(request)
     run = get_object_or_404(Run, pk=run_id)
@@ -288,4 +322,5 @@ def component_rate(request: HttpRequest, run_id: int, index: int) -> HttpRespons
     context = _component_context(run, component, user)
     context["active_axis"] = _active_axis(request)
     context["active_background"] = _active_background(request, run)
+    context["active_smoothing"] = _active_smoothing(request, run)
     return render(request, "core/partials/rate_response.html", context)
