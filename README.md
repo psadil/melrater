@@ -113,7 +113,7 @@ pixi run -e render manage rerender_montages
 pixi run manage push_runs --force --server "https://$(ssh hetzner vm-host)/melrater" --user <ingest account>
 ```
 
-then `prune_orphan_montages` on the box, promptly: the old and new sets sit side by side until it runs.
+A successful push drops the superseded set itself (the row is pointed at the new digest, then every other digest of that run is deleted), so after a clean re-push `prune_orphan_montages` on the box reports nothing to do. Run it anyway: it is the safety net for a push that died between storing the files and writing the rows.
 
 A push that dies mid-request leaves montages under a uuid no row names. Invisible rather than broken — that ordering is deliberate, and it is why a half-finished push never shows a reviewer a screen of missing images. Nothing reclaims the space automatically; do it when convenient:
 
