@@ -183,3 +183,70 @@ def test_metric_row_title_carries_the_definition(
         "tsjump:0 · ts.jump.max.abs.diff\nlargest absolute frame-to-frame change, "
         "in units of the timecourse's own standard deviation"
     )
+
+
+def test_background_hotkey_swaps_the_montage(
+    logged_in_anat_page, live_server, anat_ingested_run
+) -> None:
+    # Arrange
+    logged_in_anat_page.goto(f"{live_server.url}/runs/{anat_ingested_run.pk}/ic/1/")
+
+    # Act
+    logged_in_anat_page.keyboard.press("b")
+
+    # Assert: expect() retries — the anatomical has no src until first shown
+    expect(
+        logged_in_anat_page.locator('img[data-bg-img="anat"][data-axis-img="axial"]')
+    ).to_be_visible()
+
+
+def test_background_choice_persists_across_navigation(
+    logged_in_anat_page, live_server, anat_ingested_run
+) -> None:
+    # Arrange: the hotkey goes through the button's click, so it fires htmx's
+    # preference POST exactly as clicking does
+    logged_in_anat_page.goto(f"{live_server.url}/runs/{anat_ingested_run.pk}/ic/1/")
+    with logged_in_anat_page.expect_response("**/prefs/background/"):
+        logged_in_anat_page.keyboard.press("b")
+
+    # Act
+    logged_in_anat_page.keyboard.press("ArrowRight")
+    logged_in_anat_page.wait_for_url("**/ic/2/")
+
+    # Assert
+    expect(
+        logged_in_anat_page.locator('img[data-bg-img="anat"][data-axis-img="axial"]')
+    ).to_be_visible()
+
+
+def test_background_hotkey_keeps_the_chosen_axis(
+    logged_in_anat_page, live_server, anat_ingested_run
+) -> None:
+    # Arrange: pick a non-default axis first
+    logged_in_anat_page.goto(f"{live_server.url}/runs/{anat_ingested_run.pk}/ic/1/")
+    with logged_in_anat_page.expect_response("**/prefs/axis/"):
+        logged_in_anat_page.click('[data-axis-btn="coronal"]')
+
+    # Act: swapping the background must not throw the axis away
+    logged_in_anat_page.keyboard.press("b")
+
+    # Assert
+    expect(
+        logged_in_anat_page.locator('img[data-bg-img="anat"][data-axis-img="coronal"]')
+    ).to_be_visible()
+
+
+def test_the_browser_decodes_the_montage_codec(
+    logged_in_page, live_server, ingested_run: Run
+) -> None:
+    # Arrange: montages are AVIF with 4:4:4 chroma (AV1 profile 1), chosen
+    # because 4:2:0 smears the per-voxel overlay colour. A browser that could
+    # not decode that would show a broken image and nothing else would fail.
+    logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
+    montage = logged_in_page.locator('img[data-axis-img="axial"].active')
+
+    # Act
+    expect(montage).to_be_visible()
+
+    # Assert: naturalWidth is 0 for an image the browser could not decode
+    assert montage.evaluate("img => img.naturalWidth") > 0

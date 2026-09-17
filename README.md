@@ -38,14 +38,20 @@ bidslake index -i /path/to/derivatives --adapter feat -o study.duckdb
 then hand the catalog to `import_run`:
 
 ```sh
-pixi run manage import_run study.duckdb
+pixi run -e render manage import_run study.duckdb
 ```
+
+`-e render` is the pixi environment that carries scipy, which resampling the anatomical montage background needs. It is deliberately not in the default environment, because the default one is what the container image is built from and the server never renders anything.
 
 Every MELODIC run the catalog knows is ingested (the motion parameters and per-component variance stats come straight from the catalog's `feat_motion`/`feat_icstats` tables). Already-ingested runs are skipped, and a run with missing or ambiguous inputs is reported and skipped. `--sub/--ses/--task/--run` narrow the import; `--base-dir` rebases the catalog's roots when the data moved after indexing.
 
 A few hundred runs is roughly an hour, so a run that fails is reported and the batch carries on; the exit status is non-zero if anything failed, and `--stop-on-error` aborts on the first one instead. `--dry-run` reports what would be ingested without writing anything — worth a few seconds before committing to the hour.
 
-Montage rendering parallelizes across `--workers` processes (default: CPUs − 2; a 96-component run takes a few seconds).
+Montage rendering parallelizes across `--workers` processes (default: CPUs − 2; a 96-component run takes about 25 seconds).
+
+Each component is rendered over every background the run has: the MELODIC mean functional always, and the FEAT registration's structural (`reg/highres.nii.gz`, resampled through `reg/highres2example_func.mat`) when the run has one. A run whose registration was never run still ingests, with the functional background alone — the two roles are optional, and only the required ones can make a run be skipped. The backgrounds themselves are sampled once per run rather than once per component, so a second one roughly doubles the bytes but costs very little extra time.
+
+Indexing and ingesting a tree that a pipeline is still filling is a thing you do over and over, so it is one script: see [The whole thing, repeatedly](#the-whole-thing-repeatedly).
 
 ## Rate
 
@@ -54,6 +60,10 @@ pixi run serve
 ```
 
 This collects static files and starts [granian](https://github.com/emmett-framework/granian) on <http://127.0.0.1:8000/>. The run list filters by subject, session, task or run, hides completed runs, and offers a resume link to the first component you have not rated.
+
+Keyboard shortcuts on a component page: `1`/`s`, `2`/`u`, `3`/`n` to rate, `←`/`→` to move between components, `g` to jump to one by number, `a` to toggle auto-advance, and `b` to swap the montage background.
+
+On `b`: the structural is sharper and much easier to name a structure on, but FEAT registers it to the functional with a *linear* transform and nothing models EPI susceptibility distortion, so orbitofrontal, temporal-pole and sinus-adjacent voxels can be several millimetres out. It tells you what a component is sitting on; it is not evidence that the functional data are where it says they are. Judge a component that hugs the brain edge, a sinus or a ventricle on the functional background, which carries the true EPI geometry.
 
 ## Push runs to the deployment
 
@@ -68,17 +78,38 @@ The `/melrater` is the path prefix the deployment is served under (see [Deployin
 
 It prompts for the password unless `MELRATER_PUSH_PASSWORD` is set, so the credential need not live in a file. Bad push passwords go through django-axes (subject to lock-out after too many failed attempts).
 
-A run is ~288 montages and a couple of megabytes of JSON. A few hundred runs is a few gigabytes and is throughput-bound, so expect it to take about as long as `rsync`. It is safe to interrupt; runs the server already holds with the same montages are skipped, which makes re-running free, and the comparison is exact rather than a guess, because a run's montage digest is derived from the montage bytes and so means the same thing in both databases.
+A run is ~288 montages per background — so ~576 and roughly 55 MB for a registered run — and a couple of megabytes of JSON. A few hundred runs is a few gigabytes and is throughput-bound, so expect it to take about as long as `rsync`. It is safe to interrupt; runs the server already holds with the same montages are skipped, which makes re-running free, and the comparison is exact rather than a guess, because a run's montage digest is derived from the montage bytes and so means the same thing in both databases.
 
 Ingesting and pushing can be one step:
 
 ```sh
-pixi run manage import_run study.duckdb --push "https://$(ssh hetzner vm-host)/melrater" --user <ingest account>
+pixi run -e render manage import_run study.duckdb --push "https://$(ssh hetzner vm-host)/melrater" --user <ingest account>
 ```
 
 A failed push there is reported separately from a failed ingest: the runs are still on the laptop, and `push_runs` will pick them up. `--dry-run` reports what would be sent; `--new` sends only runs the server has never seen; `--force` re-sends regardless. A run that fails is reported and the batch carries on, with a non-zero exit at the end.
 
-Re-renders travel the same way. `rerender_montages` cannot run on the server (no niftis there), so re-render locally and push. The new montages are written to a new digest directory, the row is pointed at it, and the old set is deleted, so reviewers pick the change up on their next page load.
+### The whole thing, repeatedly
+
+`deploy/ingest.sh` is those two commands with the three easy mistakes taken out of your hands -- an absolute dataset root, a bidslake CLI that agrees with the rev `pixi.toml` pins, and the `/melrater` prefix on the URL:
+
+```sh
+MELRATER_PUSH_USER=<ingest account> ./deploy/ingest.sh ~/git/derivatives
+```
+
+It is written for a tree a pipeline is still filling, which is the normal case. Re-indexing under the same dataset id replaces that root's rows rather than duplicating them, runs already ingested here are skipped, runs the server already holds with the same montages are skipped there, and a run that is only half written is reported and picked up by the next invocation. So the answer to "more runs have landed" is to run it again.
+
+`MELRATER_SERVER`, `MELRATER_DATASET` and `MELRATER_CATALOG` override the target, the catalog's dataset id and its path. The password is not an argument here either.
+
+Re-renders travel the same way. `rerender_montages` cannot run on the server (no niftis there), so re-render locally (`pixi run -e render manage rerender_montages`) and push. The new montages are written to a new digest directory, the row is pointed at it, and the old set is deleted, so reviewers pick the change up on their next page load. A re-render is also where a run gains or loses its anatomical background, since that depends on whether `reg/` is there at render time.
+
+**Migration note.** Montage filenames gained a background token — `ic007_axial.avif` became `ic007_func_axial.avif` — which changes every montage digest. Any run ingested before that change serves 404s until it is re-rendered and pushed:
+
+```sh
+pixi run -e render manage rerender_montages
+pixi run manage push_runs --force --server "https://$(ssh hetzner vm-host)/melrater" --user <ingest account>
+```
+
+then `prune_orphan_montages` on the box, promptly: the old and new sets sit side by side until it runs.
 
 A push that dies mid-request leaves montages under a uuid no row names. Invisible rather than broken — that ordering is deliberate, and it is why a half-finished push never shows a reviewer a screen of missing images. Nothing reclaims the space automatically; do it when convenient:
 
@@ -171,7 +202,7 @@ rather than trusting this table; Hetzner's line-up moves.
 | Name       | `hetzner`                              | Same string as the `Host` alias in [SSH access](#ssh-access-laptop), which is `deploy.sh`'s default target |
 | Volume     | none                                   | See below |
 
-40 GB is likely enough. The arithmetic on 40: Ubuntu and Docker take ~3 GB; the image is 2.43 GB *unpacked* (the 535 MiB under [Without a registry](#without-a-registry) is the wire size, a different measurement) and a redeploy holds two of those until `docker image prune -f`; an incoming push holds one run's tar in `/tmp` while it is read, which is tens of megabytes. That leaves roughly 16 GB of montages, a few hundred runs. Skip the external volume for the same reason it is a chore later: `compose.yaml` bind-mounts absolute paths, so a volume added afterwards has to be mounted at `/srv/melrater` itself — stack stopped, data moved, everything re-chowned.
+40 GB is likely enough. The arithmetic on 40: Ubuntu and Docker take ~3 GB; the image is 2.43 GB *unpacked* (the 535 MiB under [Without a registry](#without-a-registry) is the wire size, a different measurement) and a redeploy holds two of those until `docker image prune -f`; an incoming push holds one run's tar in `/tmp` while it is read, which is tens of megabytes. That leaves roughly 16 GB of montages — with both backgrounds, about 300 runs, and it is the binding constraint on how many runs the box can hold. Skip the external volume for the same reason it is a chore later: `compose.yaml` bind-mounts absolute paths, so a volume added afterwards has to be mounted at `/srv/melrater` itself — stack stopped, data moved, everything re-chowned.
 
 #### SSH access [laptop]
 

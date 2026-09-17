@@ -91,17 +91,22 @@ input.jump {
 .ratebar .rate-buttons { flex: 0 0 480px; }
 .progress { color: var(--muted); font-size: 12px; margin-left: auto; }
 
-.axis-btns { display: flex; gap: 6px; margin-bottom: 10px; }
-.axis-btn {
+.axis-btns { display: flex; gap: 6px; margin-bottom: 10px; align-items: stretch; }
+.axis-btn, .bg-btn {
   background: none; border: 1px solid var(--border); border-radius: 6px;
   color: var(--muted); padding: 3px 12px; cursor: pointer; font: inherit;
   font-size: 12px;
 }
-.axis-btn.active { color: var(--text); background: var(--panel2); border-color: var(--accent); }
+.axis-btn.active, .bg-btn.active { color: var(--text); background: var(--panel2); border-color: var(--accent); }
+.btn-sep { width: 1px; background: var(--border); margin: 2px 4px; }
+.btn-key { color: var(--muted); font-size: 11px; align-self: center; }
 .montage { width: 100%; height: auto; border-radius: 4px; }
+/* The anatomical montages are rendered on a finer grid, so the two backgrounds
+   have different intrinsic widths; both are shown at the same displayed size. */
 img[data-axis-img] { display: none; max-width: 908px; }
 img[data-axis-img].active { display: block; }
-.montage-caption { color: var(--muted); font-size: 11px; margin-top: 6px; }
+.montage-caption { color: var(--muted); font-size: 11px; margin-top: 6px; display: none; }
+.montage-caption.active { display: block; }
 
 /* verdict card */
 .verdict-row { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; }

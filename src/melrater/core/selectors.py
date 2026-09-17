@@ -29,6 +29,25 @@ from melrater.core.schemas import (
 #: Display order of the montage axes (montage.AXES is keyed by array axis).
 AXIS_ORDER = ("axial", "coronal", "sagittal")
 
+#: Display order of the montage backgrounds. A run carries its own subset in
+#: `Run.montage_backgrounds`; this is only the order they are offered in.
+BACKGROUND_ORDER = ("func", "anat")
+
+#: What to call each background in the UI. The stored keys are abbreviations
+#: because they are in every montage filename; buttons are not.
+BACKGROUND_LABELS = {"func": "functional", "anat": "anatomical"}
+
+
+def background_buttons(run: Run) -> list[dict[str, str]]:
+    """This run's backgrounds as ``{key, label}``, in display order."""
+    have = set(run.montage_backgrounds)
+    return [
+        {"key": background, "label": BACKGROUND_LABELS[background]}
+        for background in BACKGROUND_ORDER
+        if background in have
+    ]
+
+
 #: Runs per page of the run list.
 RUNS_PER_PAGE = 50
 
@@ -281,7 +300,7 @@ def prob_entries_for_run(
     return entries, (thr / 100.0) if thr is not None else None
 
 
-def montage_url(run: Run, index: int, axis: str) -> str:
+def montage_url(run: Run, index: int, background: str, axis: str) -> str:
     """URL of one rendered montage.
 
     The run's montage digest is part of the path, so a re-render mints new
@@ -291,13 +310,26 @@ def montage_url(run: Run, index: int, axis: str) -> str:
     """
     name = montage_store.run_prefix(
         run.uuid, str(run.montage_digest)
-    ) + montage.montage_name(index, axis, str(run.montage_format))
+    ) + montage.montage_name(index, background, axis, str(run.montage_format))
     return montage_store.url(name)
 
 
-def montage_urls(component: Component) -> dict[str, str]:
+def montage_urls(component: Component) -> dict[str, dict[str, str]]:
+    """``{background: {axis: url}}``, for the backgrounds this run has.
+
+    Filtered rather than exhaustive: an unregistered run has no anatomical
+    montages, and offering their URLs would put six broken images on the page.
+    """
     run = component.run
-    return {axis: montage_url(run, component.index, axis) for axis in AXIS_ORDER}
+    have = set(run.montage_backgrounds)
+    return {
+        background: {
+            axis: montage_url(run, component.index, background, axis)
+            for axis in AXIS_ORDER
+        }
+        for background in BACKGROUND_ORDER
+        if background in have
+    }
 
 
 def user_label_for_component(
@@ -356,6 +388,7 @@ def run_payload(run: Run) -> RunPayload:
         metric_stats=run_data(run).metric_stats,
         montage_format=montage_format,
         montage_digest=str(run.montage_digest),
+        backgrounds=tuple(run.montage_backgrounds),
         components=components,
         fix=_fix_payloads(run),
     )

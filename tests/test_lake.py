@@ -162,3 +162,35 @@ def test_unreadable_icstats_row_yields_no_inputs() -> None:
     run = assemble(icstats=icstats)
 
     assert run.inputs is None
+
+
+def registered_roles() -> dict[str, Path | None]:
+    """`resolved_roles` plus the optional FEAT registration pair."""
+    root = Path("/data") / RUN_DIR
+    return resolved_roles() | {
+        "highres": root / "reg" / "highres.nii.gz",
+        "highres2func": root / "reg" / "highres2example_func.mat",
+    }
+
+
+def test_a_run_without_the_optional_roles_still_ingests() -> None:
+    # Assert: `unresolved` is fed the required roles only, which is the whole
+    # of the optionality mechanism — an unregistered run is not a problem run
+    assert assemble(roles=resolved_roles()).inputs is not None
+
+
+def test_a_resolved_registration_reaches_the_inputs() -> None:
+    # Act
+    run = assemble(roles=registered_roles())
+
+    # Assert
+    assert run.inputs is not None and run.inputs.highres == (
+        Path("/data") / RUN_DIR / "reg" / "highres.nii.gz"
+    )
+
+
+def test_the_optional_roles_are_resolved_in_the_same_query() -> None:
+    # Assert: one round-trip, not two — and the transform is keyed on
+    # from/to/mode because `desc` is inherited from the FEAT stem and so is
+    # shared by all four of a run's .mat files
+    assert set(lake._ALL_ROLES) == set(lake._ROLES) | {"highres", "highres2func"}

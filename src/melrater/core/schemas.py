@@ -17,6 +17,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+#: A montage background, mirroring montage.BACKGROUNDS. Spelled out rather than
+#: derived from it: schemas.py is the wire contract, and a vocabulary the two
+#: sides negotiate should not change silently when a constant does.
+Background = Literal["func", "anat"]
+
 
 class MetricValue(BaseModel):
     """One pyFIX metric for one component."""
@@ -56,6 +61,7 @@ class RunData(BaseModel):
     frequencies: list[float]
     metric_stats: MetricStats
     montage_format: str
+    montage_backgrounds: tuple[Background, ...]
 
 
 class ComponentData(BaseModel):
@@ -130,6 +136,12 @@ class RunPayload(BaseModel):
     #: receiver recomputes it from the bytes it actually got and refuses a
     #: mismatch, so a truncated upload cannot be committed as a whole run.
     montage_digest: str
+    #: Which backgrounds the tar carries, in display order. Defaulted rather
+    #: than required so a payload written before the anatomical background
+    #: still validates; `extra="forbid"` makes the other direction — a new
+    #: client against an old server — the loud one, which is the right way
+    #: round for a push that would otherwise store a half set.
+    backgrounds: tuple[Background, ...] = ("func",)
     components: list[ComponentPayload]
     fix: list[FixReviewerPayload]
 

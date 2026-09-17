@@ -107,9 +107,11 @@ def ingest_run(*, source: melodic.MelodicSource, image_workers: int = 0) -> Run:
         ic_path=source.ic_path,
         mean_path=source.mean_path,
         mask_path=source.mask_path,
+        anat_path=source.anat_path,
+        anat_to_func_path=source.anat_to_func_path,
         n_components=source.n_components,
         workers=image_workers,
-    ) as staged:
+    ) as (staged, backgrounds):
         digest = montage.digest_directory(staged)
         montage_store.store_directory(run_uuid, digest, staged)
 
@@ -132,6 +134,7 @@ def ingest_run(*, source: melodic.MelodicSource, image_workers: int = 0) -> Run:
                 ).model_dump(),
                 montage_format=montage_format(),
                 montage_digest=digest,
+                montage_backgrounds=list(backgrounds),
             )
             components = Component.objects.bulk_create(
                 Component(
@@ -182,20 +185,23 @@ def rerender_montages(*, run: Run, image_workers: int = 0) -> None:
     answers with different bytes — which is what lets montages be served with
     an immutable cache header.
     """
-    ic_path, mean_path, mask_path = lake.run_montage_paths(Path(run.path))
+    paths = lake.run_montage_paths(Path(run.path))
     with _staged_render(
-        ic_path=ic_path,
-        mean_path=mean_path,
-        mask_path=mask_path,
+        ic_path=paths.ic,
+        mean_path=paths.mean,
+        mask_path=paths.mask,
+        anat_path=paths.anat,
+        anat_to_func_path=paths.anat_to_func,
         n_components=run.components.count(),
         workers=image_workers,
-    ) as staged:
+    ) as (staged, backgrounds):
         digest = montage.digest_directory(staged)
         montage_store.store_directory(run.uuid, digest, staged)
 
     run.montage_format = montage_format()
     run.montage_digest = digest
-    run.save(update_fields=["montage_format", "montage_digest"])
+    run.montage_backgrounds = list(backgrounds)
+    run.save(update_fields=["montage_format", "montage_digest", "montage_backgrounds"])
     montage_store.retain_digest(run.uuid, digest)
 
 
@@ -212,37 +218,69 @@ def _staged_render(
     ic_path: Path,
     mean_path: Path,
     mask_path: Path,
+    anat_path: Path | None,
+    anat_to_func_path: Path | None,
     n_components: int,
     workers: int,
-) -> Iterator[Path]:
+) -> Iterator[tuple[Path, tuple[str, ...]]]:
     """Render one run's montages into a temporary directory.
 
     A plain directory rather than the storage backend, because the render
     parallelizes over spawned processes and montage.py is deliberately
     Django-free; storage.store_directory ingests the result.
+
+    Yields the directory and the backgrounds that were rendered into it. A run
+    without a registration gets the functional background alone; a registration
+    that is present but unusable raises, and `import_run` reports that run and
+    carries on, as it does for any other bad input. Missing is not the same as
+    broken, and only the first of those is allowed to pass quietly.
     """
+    # deferred: resample needs scipy, which is in the `render` pixi feature and
+    # deliberately not in the runtime image — the server imports this module
+    # for the ingest API but never renders anything
+    from melrater.core import resample
+
     mean_img = melodic.nib.load(mean_path)
     mask_img = melodic.nib.load(mask_path)
     assert isinstance(mean_img, melodic.nib.nifti1.Nifti1Image)
     assert isinstance(mask_img, melodic.nib.nifti1.Nifti1Image)
     bg = montage.canonical_vol(mean_img)
     mask = montage.canonical_vol(mask_img)
-    window = montage.robust_window(bg, mask)
     picks_by_axis = {
         name: montage.axis_picks(mask, axis) for name, axis in montage.AXES.items()
     }
+    backgrounds = [
+        montage.Background(
+            name="func",
+            factor=float(montage.UPSCALE),
+            planes=montage.gray_planes(
+                montage.volume_planes(bg, picks_by_axis),
+                montage.robust_window(bg, mask),
+            ),
+        )
+    ]
+    if anat_path is not None and anat_to_func_path is not None:
+        anat_img = melodic.nib.load(anat_path)
+        assert isinstance(anat_img, melodic.nib.nifti1.Nifti1Image)
+        backgrounds.append(
+            resample.anat_background(
+                anat_img=anat_img,
+                func_img=mean_img,
+                anat_to_func=resample.read_flirt_mat(anat_to_func_path),
+                picks_by_axis=picks_by_axis,
+            )
+        )
     staged = Path(tempfile.mkdtemp(prefix="melrater-montage-"))
     try:
         montage.render_run_montages(
             ic_path,
             list(range(1, n_components + 1)),
-            bg,
+            backgrounds,
             picks_by_axis,
-            window,
             staged,
             workers=workers,
         )
-        yield staged
+        yield staged, tuple(b.name for b in backgrounds)
     finally:
         shutil.rmtree(staged, ignore_errors=True)
 
@@ -263,7 +301,8 @@ def store_pushed_montages(
 
     Every name is rebuilt by `transfer.read_montage_tar`, so nothing the
     sender chose reaches a path. The set is then checked twice over: it must
-    hold exactly three montages per component, and its digest — recomputed
+    hold exactly one montage per component, background and axis, and its
+    digest — recomputed
     from the bytes that actually arrived — must be the one the payload
     declared. A truncated upload therefore cannot be committed as a whole run.
     """
@@ -278,12 +317,13 @@ def store_pushed_montages(
         for name, data in transfer.read_montage_tar(
             tar,
             n_components=n_components,
+            backgrounds=payload.backgrounds,
             montage_format=payload.montage_format,
             max_member_bytes=settings.INGEST_MAX_MONTAGE_BYTES,
         ):
             montage_store.save(prefix + name, data)
             hashed.append((name, hashlib.sha256(data).digest()))
-        expected = 3 * n_components
+        expected = montage.montage_count(n_components, payload.backgrounds)
         if len(hashed) != expected:
             raise PushRejected(
                 f"{len(hashed)} montages for {n_components} components, "
@@ -325,6 +365,7 @@ def create_pushed_run(*, payload: RunPayload) -> Run:
             metric_stats=payload.metric_stats.model_dump(),
             montage_format=payload.montage_format,
             montage_digest=payload.montage_digest,
+            montage_backgrounds=list(payload.backgrounds),
         )
         components = Component.objects.bulk_create(
             Component(
@@ -360,7 +401,9 @@ def refresh_pushed_run(*, run: Run, payload: RunPayload) -> Run:
     """Point an already-ingested run at a newly pushed set of montages.
 
     A run that exists is only ever re-rendered, never rewritten: this touches
-    `montage_format` and `montage_digest` and nothing else. No Component and
+    `montage_format`, `montage_digest` and `montage_backgrounds` and nothing
+    else — a re-render is exactly where a run gains or loses its anatomical
+    background, so that list travels with the digest. No Component and
     no Classification is reachable from here, which is what bounds what a
     compromised ingest account can do to a run reviewers have already worked
     on — and it matches the only reason to push a run twice, which is that its
@@ -371,7 +414,8 @@ def refresh_pushed_run(*, run: Run, payload: RunPayload) -> Run:
     """
     run.montage_format = payload.montage_format
     run.montage_digest = payload.montage_digest
-    run.save(update_fields=["montage_format", "montage_digest"])
+    run.montage_backgrounds = list(payload.backgrounds)
+    run.save(update_fields=["montage_format", "montage_digest", "montage_backgrounds"])
     montage_store.retain_digest(run.uuid, payload.montage_digest)
     logger.info("ingest: refreshed %s (%s)", run.label, run.uuid)
     return run
@@ -390,6 +434,11 @@ def check_pushed_run(*, run: Run | None, payload: RunPayload) -> None:
         )
     if [c.index for c in payload.components] != list(range(1, n_components + 1)):
         raise PushRejected("components are not 1..n in order")
+    backgrounds = payload.backgrounds
+    if "func" not in backgrounds or len(set(backgrounds)) != len(backgrounds):
+        raise PushRejected(
+            f"backgrounds {list(backgrounds)} must be unique and include 'func'"
+        )
     for fix in payload.fix:
         if len(fix.verdicts) != n_components:
             raise PushRejected(

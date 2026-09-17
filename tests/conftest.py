@@ -13,6 +13,23 @@ SHAPE = (6, 6, 4)
 TR = 2.0
 FD_STEP = 0.01  # constant translation ramp -> FD == FD_STEP everywhere but t=0
 
+#: The synthetic structural: 1 mm over the functional's 2 mm field of view,
+#: stored neurologically (positive determinant) so `fsl_scale`'s x-flip branch
+#: is the one these tests exercise.
+ANAT_SHAPE = (12, 12, 8)
+ANAT_AFFINE = np.diag([1.0, 1.0, 1.0, 1.0])
+#: highres -> example_func in FSL's scaled-millimetre frame. A 1 mm shift along
+#: x, half a functional voxel: enough that dropping it moves the montage,
+#: small enough that the block stays in view.
+ANAT_TO_FUNC = np.array(
+    [
+        [1.0, 0.0, 0.0, 1.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+)
+
 
 @pytest.fixture
 def melodic_dir(tmp_path: Path) -> Path:
@@ -59,6 +76,39 @@ def melodic_dir(tmp_path: Path) -> Path:
         "[2, 3]\n"
     )
     return root
+
+
+def write_registration(root: Path) -> Path:
+    """Write the FEAT registration the anatomical background needs.
+
+    A function rather than only a fixture so a test can place it at a chosen
+    moment — "the registration landed after the run was ingested" is a real
+    sequence, and expressing it through fixture ordering would make the test
+    pass for the wrong reason the day that ordering shifts.
+    """
+    reg = root / "reg"
+    reg.mkdir()
+    anat = np.zeros(ANAT_SHAPE, dtype="float32")
+    anat[2:-2, 2:-2, 2:-2] = 100.0  # a hard-edged block, so a shift is visible
+    nib.nifti1.Nifti1Image(anat, ANAT_AFFINE).to_filename(reg / "highres.nii.gz")
+    np.savetxt(reg / "highres2example_func.mat", ANAT_TO_FUNC)
+    return root
+
+
+@pytest.fixture
+def anat_melodic_dir(melodic_dir: Path) -> Path:
+    """`melodic_dir` plus the FEAT registration the anatomical needs.
+
+    A 1 mm structural on its own world affine, over roughly the functional's
+    extent, and a FLIRT matrix that is deliberately *not* identity, so a
+    montage rendered through it would be visibly wrong if the transform were
+    ever dropped.
+
+    Separate from `melodic_dir` on purpose: leaving the shared fixture
+    unregistered keeps "a run without a registration still ingests" a standing
+    regression test across the whole suite, rather than one nobody remembers.
+    """
+    return write_registration(melodic_dir)
 
 
 def run_inputs(root: Path):
@@ -116,11 +166,32 @@ def montage_dir(media_root: Path, run) -> Path:
     return media_root / "runs" / str(run.uuid) / str(run.montage_digest)
 
 
+def anat_run_inputs(root: Path):
+    """`run_inputs` with the optional registration roles resolved."""
+    import dataclasses
+
+    return dataclasses.replace(
+        run_inputs(root),
+        highres=root / "reg" / "highres.nii.gz",
+        highres2func=root / "reg" / "highres2example_func.mat",
+    )
+
+
 @pytest.fixture
 def ingested_run(melodic_dir: Path, media_root: Path):
     from melrater.core import melodic, services
 
     return services.ingest_run(source=melodic.load_run(run_inputs(melodic_dir)))
+
+
+@pytest.fixture
+def anat_ingested_run(anat_melodic_dir: Path, media_root: Path):
+    """A run whose registration is present, so both backgrounds are rendered."""
+    from melrater.core import melodic, services
+
+    return services.ingest_run(
+        source=melodic.load_run(anat_run_inputs(anat_melodic_dir))
+    )
 
 
 @pytest.fixture

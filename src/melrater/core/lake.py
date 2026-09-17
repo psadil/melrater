@@ -49,6 +49,29 @@ _ROLES: dict[str, dict[str, str | None]] = {
     "motion": {"suffix": "timeseries", "desc": "motion", "extension": ".par"},
 }
 
+#: Roles a run may legitimately lack. Resolved in the same sibling query as
+#: `_ROLES` — one round-trip either way — but deliberately kept out of the
+#: `bidslake.unresolved` call in `discover_runs`, and that omission is the
+#: entire optionality mechanism: `_ROLES` is mandatory only because every one
+#: of its names is handed to `unresolved`. A run whose FEAT registration was
+#: never run still ingests, with the functional montage background alone.
+#:
+#: The transform is keyed on from/to/mode rather than `desc`: `desc` is
+#: inherited from the enclosing FEAT directory's stem, so all four of a run's
+#: `.mat` files share it and it discriminates nothing.
+_OPTIONAL_ROLES: dict[str, dict[str, str | None]] = {
+    "highres": {"suffix": "T1w", "desc": "brain", "extension": ".nii.gz"},
+    "highres2func": {
+        "suffix": "xfm",
+        "from": "highres",
+        "to": "exfunc",
+        "mode": "image",
+        "extension": ".mat",
+    },
+}
+
+_ALL_ROLES = _ROLES | _OPTIONAL_ROLES
+
 _MOTION_COLUMNS = ("rot_x", "rot_y", "rot_z", "trans_x", "trans_y", "trans_z")
 
 #: The required pair only: melrater consumes explained/total variance, and the
@@ -122,7 +145,7 @@ def discover_runs(
                 if row[f"{name}__n"] == 1
                 else None
             )
-            for name in _ROLES
+            for name in _ALL_ROLES
         }
         fid = _role_file_id(row, "motion")
         sid = _role_file_id(row, "icstats")
@@ -132,6 +155,9 @@ def discover_runs(
                 anchor_local=bidslake.to_local_path(bidslake.sibling_path(lake, row)),
                 entities={k: row[k] for k in ("sub", "ses", "task", "run")},
                 roles=roles,
+                # the required roles only: an optional one that matched
+                # nothing, or matched ambiguously, is dropped by the `== 1`
+                # test above rather than skipping the run
                 unresolved=bidslake.unresolved(row, _ROLES),
                 classifications=classifications.get(_unit_key(row), ()),
                 motion=motion.get(fid) if fid is not None else None,
@@ -141,14 +167,46 @@ def discover_runs(
     return sorted(out, key=lambda r: r.label)
 
 
-def run_montage_paths(root: Path) -> tuple[Path, Path, Path]:
-    """(melodic_IC, mean, mask) under an ingested run's directory.
+@dataclasses.dataclass(frozen=True)
+class MontagePaths:
+    """One ingested run's montage inputs, by the feat layout.
+
+    ``anat`` and ``anat_to_func`` are both set or both None, for the same
+    reason as `melodic.RunInputs`: an anatomical that cannot be put on the
+    functional grid is not a background.
+    """
+
+    ic: Path
+    mean: Path
+    mask: Path
+    anat: Path | None
+    anat_to_func: Path | None
+
+
+def run_montage_paths(root: Path) -> MontagePaths:
+    """Where one ingested run's montage inputs are.
 
     For re-rendering montages of a run that is already in the database: the
     feat layout names the slots, so the relative paths live in one place.
+
+    A re-render is also where a run gains or loses its anatomical background —
+    registration may have landed after ingest, or `reg/` may have been pruned —
+    so the optional pair is checked against the filesystem here. It has to be:
+    `LayoutAt.__getitem__` does no I/O and would hand back `reg/highres.nii.gz`
+    for a run that never had one.
     """
     at = bidslake.layout("feat").under(root)
-    return at["melodic_ic"], at["melodic_mean"], at["mask"]
+    present = at.present()
+    registered = present.get("highres", False) and present.get(
+        "highres2example_func_mat", False
+    )
+    return MontagePaths(
+        ic=at["melodic_ic"],
+        mean=at["melodic_mean"],
+        mask=at["mask"],
+        anat=at["highres"] if registered else None,
+        anat_to_func=at["highres2example_func_mat"] if registered else None,
+    )
 
 
 def _unit_rows(
@@ -160,7 +218,7 @@ def _unit_rows(
     cols: list[ColumnElement[Any]] = [a.c[k] for k in UNIT]
     cols += [a.c.root_uri, a.c.file_path]
     frm: Any = a
-    for name, where in _ROLES.items():
+    for name, where in _ALL_ROLES.items():
         lat, sel = bidslake.sibling(a, name, UNIT, where)
         cols += sel
         frm = frm.outerjoin(lat, true())
@@ -272,6 +330,8 @@ def _assemble(
         ic=resolved["ic"],
         mean=resolved["mean"],
         mask=resolved["mask"],
+        highres=resolved.get("highres"),
+        highres2func=resolved.get("highres2func"),
         classifications=tuple(classifications),
         motion=motion,
         icstats=icstats,

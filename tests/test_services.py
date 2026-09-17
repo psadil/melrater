@@ -5,9 +5,17 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db.models import ProtectedError
 
-from melrater.core import melodic, montage, selectors, services
+from melrater.core import melodic, montage, resample, selectors, services
 from melrater.core.models import Classification, Component, Reviewer, Run
-from tests.conftest import N_COMPONENTS, N_TIMEPOINTS, TR, montage_dir, run_inputs
+from tests.conftest import (
+    N_COMPONENTS,
+    N_TIMEPOINTS,
+    TR,
+    anat_run_inputs,
+    montage_dir,
+    run_inputs,
+    write_registration,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -54,12 +62,12 @@ def test_ingest_renders_one_montage_per_component_axis(
     assert len(files) == N_COMPONENTS * 3
 
 
-def test_ingest_montage_names_encode_component_and_axis(
+def test_ingest_montage_names_encode_component_background_and_axis(
     ingested_run: Run, media_root: Path
 ) -> None:
     files = {p.name for p in (montage_dir(media_root, ingested_run)).iterdir()}
 
-    assert f"ic001_axial.{ingested_run.montage_format}" in files
+    assert f"ic001_func_axial.{ingested_run.montage_format}" in files
 
 
 def test_ingest_rolls_back_when_montage_rendering_fails(
@@ -216,7 +224,7 @@ def test_montage_urls_are_keyed_by_uuid(ingested_run: Run) -> None:
     urls = selectors.montage_urls(ingested_run.components.get(index=1))
 
     # Assert
-    assert f"/media/runs/{ingested_run.uuid}/" in urls["axial"]
+    assert f"/media/runs/{ingested_run.uuid}/" in urls["func"]["axial"]
 
 
 def test_montage_urls_carry_the_content_digest(ingested_run: Run) -> None:
@@ -225,7 +233,7 @@ def test_montage_urls_carry_the_content_digest(ingested_run: Run) -> None:
 
     # Assert: the digest is in the path, which is what makes the immutable
     # cache header on /media/ honest — different bytes are a different URL
-    assert f"/{ingested_run.montage_digest}/" in urls["axial"]
+    assert f"/{ingested_run.montage_digest}/" in urls["func"]["axial"]
 
 
 def test_rerender_leaves_no_superseded_montages(
@@ -241,3 +249,69 @@ def test_rerender_leaves_no_superseded_montages(
     # Assert: the old set is dropped once the row points at the new one
     digests = [p.name for p in (media_root / "runs" / str(ingested_run.uuid)).iterdir()]
     assert digests == [str(ingested_run.montage_digest)]
+
+
+def test_ingest_records_the_functional_background_alone(ingested_run: Run) -> None:
+    # Assert: a run with no FEAT registration still ingests, one background
+    assert ingested_run.montage_backgrounds == ["func"]
+
+
+def test_ingest_records_both_backgrounds_when_registered(anat_ingested_run) -> None:
+    # Assert
+    assert anat_ingested_run.montage_backgrounds == ["func", "anat"]
+
+
+def test_ingest_renders_a_montage_per_background_and_axis(
+    anat_ingested_run, media_root: Path
+) -> None:
+    # Act
+    files = list(montage_dir(media_root, anat_ingested_run).iterdir())
+
+    # Assert
+    assert len(files) == montage.montage_count(N_COMPONENTS, ("func", "anat"))
+
+
+def test_ingest_names_the_anatomical_montages(
+    anat_ingested_run, media_root: Path
+) -> None:
+    files = {p.name for p in montage_dir(media_root, anat_ingested_run).iterdir()}
+
+    assert f"ic001_anat_axial.{anat_ingested_run.montage_format}" in files
+
+
+def test_rerender_picks_up_a_registration_added_after_ingest(
+    ingested_run: Run, melodic_dir: Path, media_root: Path
+) -> None:
+    # Arrange: registration finishing after the run was first ingested, which
+    # is the ordinary case for a tree a pipeline is still filling. Written
+    # here rather than by a fixture so the sequence is the test's, not
+    # pytest's.
+    write_registration(melodic_dir)
+    services.rerender_montages(run=ingested_run)
+
+    # Assert: a re-render is where a run gains its anatomical background
+    assert ingested_run.montage_backgrounds == ["func", "anat"]
+
+
+def test_rerender_drops_a_registration_that_went_away(
+    anat_ingested_run, anat_melodic_dir: Path, media_root: Path
+) -> None:
+    # Arrange
+    (anat_melodic_dir / "reg" / "highres.nii.gz").unlink()
+
+    # Act
+    services.rerender_montages(run=anat_ingested_run)
+
+    # Assert: both or neither, so a stale anatomical is never half-served
+    assert anat_ingested_run.montage_backgrounds == ["func"]
+
+
+def test_ingest_fails_on_a_registration_that_is_present_but_broken(
+    anat_melodic_dir: Path, media_root: Path
+) -> None:
+    # Arrange: missing is tolerated, corrupt is not
+    (anat_melodic_dir / "reg" / "highres2example_func.mat").write_text("not a matrix\n")
+
+    # Act / Assert
+    with pytest.raises(resample.RegistrationError):
+        services.ingest_run(source=melodic.load_run(anat_run_inputs(anat_melodic_dir)))

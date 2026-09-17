@@ -126,5 +126,16 @@ pytest-playwright = "*"
 # field descriptor values, and request.user
 django-stubs = ">=5.2"
 
+# Montage rendering resamples the anatomical background onto the montage's own
+# pixel grid (melrater/core/resample.py). Deliberately not a default dependency:
+# the runtime image is built with `pixi install --locked -e default`, and the
+# server never renders -- it holds no niftis. melrater/core/services.py imports
+# `resample` lazily so that importing `services` on the server still works.
+[feature.render.dependencies]
+scipy = ">=1.14"
+
 [environments]
-dev = ["dev"]
+# dev carries render too: the test suite renders montages, and ty resolves
+# scipy from the environment pyproject.toml points it at.
+dev = ["dev", "render"]
+render = ["render"]

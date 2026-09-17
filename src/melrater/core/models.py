@@ -66,6 +66,15 @@ class Run(models.Model):
     # meaning — and it is the same value in every database that holds the run,
     # which is what lets a push decide "already present" exactly.
     montage_digest = models.CharField(max_length=16, blank=True, default="")
+    # Which backgrounds this run's montages were rendered over, in display
+    # order, drawn from montage.BACKGROUNDS. Always holds "func"; "anat" only
+    # when the run's FEAT registration was there at render time — which is a
+    # property of the *render*, not of the run, so `rerender_montages` rewrites
+    # it alongside the digest. A list rather than a boolean so the montage
+    # count arithmetic reads `len(...)` and a third background needs no column.
+    montage_backgrounds = models.JSONField(
+        default=list, help_text="Montage backgrounds rendered for this run"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     objects: ClassVar[RunManager] = RunManager()

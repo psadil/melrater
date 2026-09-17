@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 
-from melrater.core import services
+from melrater.core import montage, services
 from melrater.core.models import Classification, Reviewer, Run
 from melrater.core.schemas import RunPayload
 from tests.conftest import N_COMPONENTS
@@ -173,7 +173,9 @@ def test_push_stores_every_montage(
 
     # Assert: under the uuid and the content digest, where montage_url looks
     stored = media_root / "runs" / str(payload.uuid) / payload.montage_digest
-    assert len(list(stored.iterdir())) == 3 * N_COMPONENTS
+    assert len(list(stored.iterdir())) == montage.montage_count(
+        N_COMPONENTS, payload.backgrounds
+    )
 
 
 @pytest.fixture
@@ -194,7 +196,7 @@ def test_pushed_montage_is_served_by_the_media_view(
     # Act: close the loop — what was pushed is what reviewers load
     response = logged_in.get(
         f"/media/runs/{payload.uuid}/{payload.montage_digest}"
-        f"/ic001_axial.{payload.montage_format}"
+        f"/ic001_func_axial.{payload.montage_format}"
     )
 
     # Assert

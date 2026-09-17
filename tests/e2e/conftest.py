@@ -41,3 +41,14 @@ def documented_run(ingested_run):
         component.metrics = {real[n]: v for n, v in component.metrics.items()}
         component.save(update_fields=["metrics"])
     return ingested_run
+
+
+@pytest.fixture
+def logged_in_anat_page(page, live_server, anat_ingested_run, user):
+    """`logged_in_page` for a run that has both montage backgrounds."""
+    page.goto(f"{live_server.url}/accounts/login/")
+    page.fill('input[name="username"]', "rater")
+    page.fill('input[name="password"]', "pw")
+    page.click('button[type="submit"]')
+    page.wait_for_url(f"{live_server.url}/")
+    return page

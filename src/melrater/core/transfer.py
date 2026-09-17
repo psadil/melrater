@@ -1,4 +1,4 @@
-"""The wire format for one run's montages: a tar of ``ic<NNN>_<axis>.<ext>``.
+"""The wire format for one run's montages: a tar of ``ic<NNN>_<bg>_<axis>.<ext>``.
 
 Deliberately Django-free, like ``montage.py``: this is the module that decides
 whether bytes arriving from outside are allowed to become files, and it is
@@ -6,18 +6,19 @@ easier to trust — and to test, with no database — when it depends on nothing
 
 The guarantee it provides is that **a name chosen by the sender never reaches a
 storage path**. Every yielded name is rebuilt by ``montage.montage_name`` from
-an integer, an ``AXES`` key and a format sniffed from the bytes themselves; a
-member whose own name does not parse is refused rather than sanitised.
+an integer, a ``BACKGROUNDS`` key, an ``AXES`` key and a format sniffed from
+the bytes themselves; a member whose own name does not parse is refused rather
+than sanitised.
 """
 
 from __future__ import annotations
 
 import io
 import tarfile
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from typing import IO
 
-from melrater.core.montage import montage_name, parse_montage_name
+from melrater.core.montage import montage_count, montage_name, parse_montage_name
 
 #: Sniffed rather than trusted. The stored extension comes from these, so a
 #: blob cannot pick its own Content-Type by picking its own file name.
@@ -59,6 +60,7 @@ def read_montage_tar(
     fileobj: IO[bytes],
     *,
     n_components: int,
+    backgrounds: Sequence[str],
     montage_format: str,
     max_member_bytes: int,
 ) -> Iterator[tuple[str, bytes]]:
@@ -69,9 +71,10 @@ def read_montage_tar(
     payload: anything that is not a regular file (which is what excludes
     symlinks, hard links and device nodes), an oversized member, more members
     than the run can have, a name that is not a montage name, a component index
-    outside the run, and a format that disagrees with the run's.
+    outside the run, a background the run did not declare, and a format that
+    disagrees with the run's.
     """
-    max_members = 3 * n_components
+    max_members = montage_count(n_components, backgrounds)
     seen = 0
     with tarfile.open(fileobj=fileobj, mode="r|") as tar:
         for member in tar:
@@ -90,10 +93,14 @@ def read_montage_tar(
             parsed = parse_montage_name(member.name)
             if parsed is None:
                 raise RejectedMontage(f"{member.name!r} is not a montage name")
-            index, axis, ext = parsed
+            index, background, axis, ext = parsed
             if index > n_components:
                 raise RejectedMontage(
                     f"component {index} in a run with {n_components} components"
+                )
+            if background not in backgrounds:
+                raise RejectedMontage(
+                    f"a {background} montage in a run that declares {list(backgrounds)}"
                 )
             handle = tar.extractfile(member)
             if handle is None:  # unreachable for isfile(), but typed Optional
@@ -105,7 +112,7 @@ def read_montage_tar(
                     f"{member.name!r} is a {sniffed}, but the run is "
                     f"{montage_format} and the name says {ext}"
                 )
-            yield montage_name(index, axis, sniffed), data
+            yield montage_name(index, background, axis, sniffed), data
 
 
 def write_montage_tar(members: Iterable[tuple[str, bytes]], fileobj: IO[bytes]) -> int:

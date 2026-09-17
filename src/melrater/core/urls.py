@@ -15,4 +15,5 @@ urlpatterns = [
         name="component-rate",
     ),
     path("prefs/axis/", views.set_axis, name="set-axis"),
+    path("prefs/background/", views.set_background, name="set-background"),
 ]

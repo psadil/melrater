@@ -25,12 +25,16 @@
   };
 
   // Only the visible montage carries a src; the others wait here until first
-  // shown, so a component page loads one image instead of three.
-  const showAxis = (axis) => {
+  // shown, so a component page loads one image instead of six.
+  const showMontage = (bg, axis) => {
     document.querySelectorAll("[data-axis-btn]").forEach((b) =>
       b.classList.toggle("active", b.dataset.axisBtn === axis));
+    document.querySelectorAll("[data-bg-btn]").forEach((b) =>
+      b.classList.toggle("active", b.dataset.bgBtn === bg));
+    document.querySelectorAll("[data-bg-caption]").forEach((c) =>
+      c.classList.toggle("active", c.dataset.bgCaption === bg));
     document.querySelectorAll("[data-axis-img]").forEach((img) => {
-      const active = img.dataset.axisImg === axis;
+      const active = img.dataset.axisImg === axis && img.dataset.bgImg === bg;
       if (active && !img.getAttribute("src") && img.dataset.src) {
         img.src = img.dataset.src;
       }
@@ -38,9 +42,19 @@
     });
   };
 
+  const currentAxis = () =>
+    document.querySelector("[data-axis-btn].active")?.dataset.axisBtn;
+  // an unregistered run renders no background buttons at all, so fall back to
+  // whichever montage is on screen
+  const currentBg = () =>
+    document.querySelector("[data-bg-btn].active")?.dataset.bgBtn ??
+    document.querySelector("[data-axis-img].active")?.dataset.bgImg;
+
   document.addEventListener("click", (e) => {
     const ax = e.target.closest("[data-axis-btn]");
-    if (ax) { showAxis(ax.dataset.axisBtn); return; }
+    if (ax) { showMontage(currentBg(), ax.dataset.axisBtn); return; }
+    const bg = e.target.closest("[data-bg-btn]");
+    if (bg) { showMontage(bg.dataset.bgBtn, currentAxis()); return; }
     const box = e.target.closest("[data-auto-advance]");
     if (box) setAutoAdvance(box.checked);
   });
@@ -80,6 +94,17 @@
     else if (e.key === "2" || e.key === "u") rate("Unknown");
     else if (e.key === "3" || e.key === "n") rate("Noise");
     else if (e.key === "a") setAutoAdvance(!autoAdvanceOn());
+    else if (e.key === "b") {
+      // cycle rather than toggle, and go through .click() rather than calling
+      // showMontage: that one path fires both the visual swap and htmx's
+      // preference POST, so the choice survives navigation exactly as the
+      // axis buttons' does
+      const btns = [...document.querySelectorAll("[data-bg-btn]")];
+      if (btns.length > 1) {
+        const at = btns.findIndex((b) => b.classList.contains("active"));
+        btns[(at + 1) % btns.length].click();
+      }
+    }
     else if (e.key === "g") {
       const jump = document.getElementById("jump");
       if (jump) {

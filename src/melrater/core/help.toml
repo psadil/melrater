@@ -33,6 +33,14 @@ url = "https://doi.org/10.1016/j.neuroimage.2011.10.018"
 text = "pyFIX feature.py"
 url = "https://git.fmrib.ox.ac.uk/fsl/pyfix/-/blob/4fd579aed58dbb4645e12ff6cddccc99e93d4329/pyfix/feature.py"
 
+[refs.jenkinson2002]
+text = "Jenkinson et al. (2002), NeuroImage 17:825-841"
+url = "https://doi.org/10.1006/nimg.2002.1132"
+
+[refs.jezzard1995]
+text = "Jezzard & Balaban (1995), Magnetic Resonance in Medicine 34:65-73"
+url = "https://doi.org/10.1002/mrm.1910340111"
+
 [refs.gofigure]
 text = "Taylor et al. (2025), Go Figure"
 url = "https://doi.org/10.52294/001c.125391"
@@ -43,7 +51,7 @@ url = "https://doi.org/10.52294/001c.125391"
 [chart.montage]
 title = "spatial map"
 body = """
-This component's z-map painted over the run's mean functional image, as a \
+This component's z-map painted over the background you have selected, as a \
 lightbox of 25 slices spread through the volume. Nothing is thresholded away: \
 weak voxels fade out rather than disappearing, so you can see what is not \
 there as well as what is."""
@@ -53,8 +61,24 @@ bullets = [
   "the number in each panel is that panel's voxel slice index",
   "axial and coronal are neurological: the subject's left is on the left of the image",
   "sagittal panels put posterior on the left, anterior on the right",
+  "press b to swap between the mean functional and the anatomical, on a run that has both",
 ]
 refs = ["gofigure"]
+
+[chart.montage_anat]
+title = "anatomical background"
+body = """
+The same z-map over this subject's brain-extracted structural, resampled onto \
+the montage's own pixel grid through FEAT's registration. It is sharper than \
+the mean functional and far easier to name a structure on, but it is not \
+evidence that the functional data are where the structural says they are."""
+bullets = [
+  "that registration is a linear (affine) fit, and nothing here models EPI susceptibility distortion, so orbitofrontal, temporal-pole and sinus-adjacent voxels can be several millimetres out",
+  "judge a component that hugs the brain edge, a sinus or a ventricle on the functional background, which has the true EPI geometry",
+  "the slice numbers are the functional volume's own indices, so they mean the same thing on both backgrounds",
+  "press b to swap backgrounds",
+]
+refs = ["jenkinson2002", "jezzard1995"]
 
 [chart.timecourse_fd]
 title = "timecourse and head motion"

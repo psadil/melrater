@@ -59,7 +59,9 @@ def test_component_detail_embeds_montage(logged_in, ingested_run: Run) -> None:
     response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
 
     # Assert
-    assert f"ic001_axial.{ingested_run.montage_format}" in response.content.decode()
+    assert (
+        f"ic001_func_axial.{ingested_run.montage_format}" in response.content.decode()
+    )
 
 
 def test_component_detail_shows_fix_probability(logged_in, ingested_run: Run) -> None:
@@ -193,7 +195,8 @@ def test_set_axis_requires_login(client, ingested_run: Run) -> None:
 def _montage_url(run: Run) -> str:
     """The first montage's URL, digest and all."""
     return (
-        f"/media/runs/{run.uuid}/{run.montage_digest}/ic001_axial.{run.montage_format}"
+        f"/media/runs/{run.uuid}/{run.montage_digest}"
+        f"/ic001_func_axial.{run.montage_format}"
     )
 
 
@@ -386,3 +389,96 @@ def test_rating_response_carries_the_verdict_help(logged_in, ingested_run: Run) 
 
     # Assert
     assert 'id="help-field-fix-verdict"' in response.content.decode()
+
+
+# --- montage background -------------------------------------------------
+
+
+def test_default_background_is_the_functional(logged_in, anat_ingested_run) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{anat_ingested_run.pk}/ic/1/")
+
+    # Assert: the IC map's own space is what a reviewer lands on
+    assert 'class="bg-btn active" data-bg-btn="func"' in response.content.decode()
+
+
+def test_set_background_stores_the_session_preference(logged_in) -> None:
+    # Act
+    logged_in.post("/prefs/background/", {"background": "anat"})
+
+    # Assert
+    assert logged_in.session["montage_background"] == "anat"
+
+
+def test_set_background_rejects_an_unknown_background(logged_in) -> None:
+    # Act
+    response = logged_in.post("/prefs/background/", {"background": "mni"})
+
+    # Assert
+    assert response.status_code == 400
+
+
+def test_set_background_requires_login(client) -> None:
+    # Act
+    response = client.post("/prefs/background/", {"background": "anat"})
+
+    # Assert
+    assert response.status_code == 302
+
+
+def test_background_preference_falls_back_for_a_run_without_one(
+    logged_in, ingested_run: Run
+) -> None:
+    # Arrange: a reviewer who chose the anatomical on some other run
+    session = logged_in.session
+    session["montage_background"] = "anat"
+    session.save()
+
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert: the functional montage is the one that gets a src, not six
+    # broken images
+    assert (
+        f'src="/media/runs/{ingested_run.uuid}/{ingested_run.montage_digest}'
+        f'/ic001_func_axial.{ingested_run.montage_format}"' in response.content.decode()
+    )
+
+
+def test_component_page_offers_no_background_switch_without_one(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert: one background is not a choice
+    assert "data-bg-btn" not in response.content.decode()
+
+
+def test_component_page_gives_only_the_active_montage_a_src(
+    logged_in, anat_ingested_run
+) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{anat_ingested_run.pk}/ic/1/")
+
+    # Assert: six montages on the page, five of them deferred
+    assert response.content.decode().count('data-src="/media/') == 5
+
+
+def test_prefetch_follows_the_chosen_background(logged_in, anat_ingested_run) -> None:
+    # Arrange
+    session = logged_in.session
+    session["montage_background"] = "anat"
+    session.save()
+
+    # Act
+    response = logged_in.get(f"/runs/{anat_ingested_run.pk}/ic/1/")
+
+    # Assert: warming the wrong background's image would be worse than not
+    # warming one at all
+    assert (
+        f'rel="prefetch" as="image" href="/media/runs/{anat_ingested_run.uuid}'
+        f"/{anat_ingested_run.montage_digest}"
+        f'/ic002_anat_axial.{anat_ingested_run.montage_format}"'
+        in response.content.decode()
+    )

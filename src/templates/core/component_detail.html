@@ -34,25 +34,42 @@
 
   <div class="brain">
     <div class="axis-btns">
-      {% for axis, url in montages.items %}
+      {% for axis in axes %}
         <button class="axis-btn{% if axis == active_axis %} active{% endif %}" data-axis-btn="{{ axis }}"
                 hx-post="{% url 'set-axis' %}" hx-vals='{"axis": "{{ axis }}"}' hx-swap="none">{{ axis }}</button>
       {% endfor %}
+      {% if background_buttons|length > 1 %}
+        <span class="btn-sep"></span>
+        {% for bg in background_buttons %}
+          <button class="bg-btn{% if bg.key == active_background %} active{% endif %}" data-bg-btn="{{ bg.key }}"
+                  hx-post="{% url 'set-background' %}" hx-vals='{"background": "{{ bg.key }}"}' hx-swap="none">{{ bg.label }}</button>
+        {% endfor %}
+        <kbd class="btn-key">b</kbd>
+      {% endif %}
     </div>
     {% comment %}
-      Only the visible axis is fetched; melrater.js promotes data-src on the
-      first switch, which cuts the page from three montages (~200 kB) to one.
+      Only the visible background+axis is fetched; melrater.js promotes
+      data-src on the first switch, which cuts the page from six montages
+      (~600 kB on a registered run) to one.
       {# ... #} is single-line only, so a multi-line note has to be this tag.
     {% endcomment %}
-    {% for axis, url in montages.items %}
-      <img class="montage{% if axis == active_axis %} active{% endif %}" data-axis-img="{{ axis }}"
-           {% if axis == active_axis %}src="{{ url }}"{% else %}data-src="{{ url }}"{% endif %}
-           alt="{{ axis }} lightbox">
-    {% endfor %}
-    <div class="montage-caption">unthresholded: opacity &prop; (|z|/3)&sup2;, opaque above |z| = 3 ·
+    {% for bg, axis_urls in montages.items %}{% for axis, url in axis_urls.items %}
+      <img class="montage{% if axis == active_axis and bg == active_background %} active{% endif %}"
+           data-bg-img="{{ bg }}" data-axis-img="{{ axis }}"
+           {% if axis == active_axis and bg == active_background %}src="{{ url }}"{% else %}data-src="{{ url }}"{% endif %}
+           alt="{{ bg }} {{ axis }} lightbox">
+    {% endfor %}{% endfor %}
+    <div class="montage-caption{% if active_background == 'func' %} active{% endif %}" data-bg-caption="func">
+      unthresholded: opacity &prop; (|z|/3)&sup2;, opaque above |z| = 3 ·
       red-yellow +, blue-lightblue &minus; (saturating at |z| = 10) ·
       labels are voxel indices · axial/coronal shown neurological (subject L on image
       <span class="nobr">left){% help_bubble "chart.montage" %}</span></div>
+    {% if 'anat' in backgrounds %}
+      <div class="montage-caption{% if active_background == 'anat' %} active{% endif %}" data-bg-caption="anat">
+        the same z-map over this subject's T1, through FEAT's <em>linear</em> EPI&rarr;T1 registration ·
+        sharper, but it does not model EPI susceptibility distortion &mdash; judge edge, sinus and
+        ventricle components on the <span class="nobr">functional{% help_bubble "chart.montage_anat" %}</span></div>
+    {% endif %}
   </div>
 
   <div class="side">

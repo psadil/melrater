@@ -71,11 +71,17 @@ class RunInputs:
     ftmix: Path
     features: Path  # fix/features.csv
     ic: Path  # melodic_IC.nii.gz
-    mean: Path  # the montage background
+    mean: Path  # the functional montage background
     mask: Path  # the montage slice-picking mask
     classifications: tuple[Path, ...]  # fix4melview_*_thr*.txt
     motion: np.ndarray  # (n_timepoints, 6) mcflirt order: 3 rot (rad), 3 trans (mm)
     icstats: np.ndarray  # (n_components, 2): explained %, total %
+    # FEAT's registration, when the run has one: the anatomical montage
+    # background and the transform onto the functional grid. Both or neither —
+    # a highres with no way onto that grid is not a background. Optional, so a
+    # run whose registration was never run still ingests.
+    highres: Path | None = None
+    highres2func: Path | None = None
     # BIDS entities as the catalog knows them; stored on the Run so the run
     # list can filter by subject/task without re-parsing labels
     sub: str = ""
@@ -102,6 +108,11 @@ class MelodicSource:
     ic_path: Path  # montage inputs, opened only at render time
     mean_path: Path
     mask_path: Path
+    # the anatomical background's inputs, or None for an unregistered run;
+    # `load_run` is where the both-or-neither rule is enforced, so nothing
+    # downstream has to re-check the pairing
+    anat_path: Path | None = None
+    anat_to_func_path: Path | None = None
     sub: str = ""
     ses: str = ""
     task: str = ""
@@ -204,6 +215,7 @@ def load_run(inputs: RunInputs) -> MelodicSource:
                 f"{result.reviewer_name} has {len(result.verdicts)} verdicts "
                 f"for {mix.shape[1]} components"
             )
+    registered = inputs.highres is not None and inputs.highres2func is not None
     return MelodicSource(
         root=inputs.root,
         label=inputs.label,
@@ -219,6 +231,8 @@ def load_run(inputs: RunInputs) -> MelodicSource:
         ic_path=inputs.ic,
         mean_path=inputs.mean,
         mask_path=inputs.mask,
+        anat_path=inputs.highres if registered else None,
+        anat_to_func_path=inputs.highres2func if registered else None,
         sub=inputs.sub,
         ses=inputs.ses,
         task=inputs.task,

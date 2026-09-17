@@ -20,7 +20,7 @@ from melrater.core import charts, selectors, services
 from melrater.core import help as help_catalog
 from melrater.core.metrics import OUTLIER_Z, family_of
 from melrater.core.models import Component, Run
-from melrater.core.montage import AXES
+from melrater.core.montage import AXES, BACKGROUNDS
 from melrater.core.schemas import ComponentData, RunData
 
 RATING_BUTTONS = [
@@ -31,6 +31,9 @@ RATING_BUTTONS = [
 
 AXIS_SESSION_KEY = "montage_axis"
 DEFAULT_AXIS = "axial"
+
+BACKGROUND_SESSION_KEY = "montage_background"
+DEFAULT_BACKGROUND = "func"
 
 # A montage URL contains the run's montage digest, so the bytes behind one
 # never change — a re-render mints new URLs. That makes them safely immutable,
@@ -181,6 +184,9 @@ def _component_context(run: Run, component: Component, user: AbstractBaseUser) -
         "next_unrated": next((i for i in unrated_after if i > index), None)
         or (unrated_after[0] if unrated_after else None),
         "montages": selectors.montage_urls(component),
+        "axes": selectors.AXIS_ORDER,
+        "backgrounds": list(run.montage_backgrounds),
+        "background_buttons": selectors.background_buttons(run),
         "fix_rows": selectors.fix_verdicts_for_component(component),
         "prob_strip": prob_strip,
         "user_label": user_labels.get(index),
@@ -203,19 +209,35 @@ def _active_axis(request: HttpRequest) -> str:
     return axis if axis in AXES else DEFAULT_AXIS
 
 
+def _active_background(request: HttpRequest, run: Run) -> str:
+    """The chosen background, clamped to what this run actually has.
+
+    Run-aware, unlike `_active_axis`: every run has all three axes, but only a
+    registered one has an anatomical. A reviewer whose preference is `anat`
+    therefore lands on `func` for a run without one, rather than on a page of
+    broken images, and the preference itself is left alone so the next
+    registered run honours it again.
+    """
+    choice = request.session.get(BACKGROUND_SESSION_KEY, DEFAULT_BACKGROUND)
+    available = list(run.montage_backgrounds) or [DEFAULT_BACKGROUND]
+    return choice if choice in available else DEFAULT_BACKGROUND
+
+
 @login_required
 def component_detail(request: HttpRequest, run_id: int, index: int) -> HttpResponse:
     run = get_object_or_404(Run, pk=run_id)
     component = get_object_or_404(Component, run=run, index=index)
     context = _component_context(run, component, _authed_user(request))
     axis = _active_axis(request)
+    background = _active_background(request, run)
     context["active_axis"] = axis
+    context["active_background"] = background
     # Warm the next component's montage while this one is being judged. Only
     # the visible axis: the other two are not fetched for this component
     # either (the template gives them data-src, not src).
     next_index = context["next_index"]
     context["prefetch_url"] = (
-        selectors.montage_url(run, next_index, axis) if next_index else None
+        selectors.montage_url(run, next_index, background, axis) if next_index else None
     )
     return render(request, "core/component_detail.html", context)
 
@@ -235,6 +257,24 @@ def set_axis(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @require_http_methods(["POST"])
+def set_background(request: HttpRequest) -> HttpResponse:
+    """Persist the montage-background choice, as `set_axis` does the axis.
+
+    Validated against the vocabulary rather than against a run: the preference
+    is global, and clamping it to a run that has no anatomical is
+    `_active_background`'s job at render time.
+    """
+    background = request.POST.get("background", "")
+    if background not in BACKGROUNDS:
+        return HttpResponseBadRequest(
+            f"invalid background: {background!r}", content_type="text/plain"
+        )
+    request.session[BACKGROUND_SESSION_KEY] = background
+    return HttpResponse(status=204)
+
+
+@login_required
+@require_http_methods(["POST"])
 def component_rate(request: HttpRequest, run_id: int, index: int) -> HttpResponse:
     user = _authed_user(request)
     run = get_object_or_404(Run, pk=run_id)
@@ -247,4 +287,5 @@ def component_rate(request: HttpRequest, run_id: int, index: int) -> HttpRespons
         return HttpResponseBadRequest(str(exc), content_type="text/plain")
     context = _component_context(run, component, user)
     context["active_axis"] = _active_axis(request)
+    context["active_background"] = _active_background(request, run)
     return render(request, "core/partials/rate_response.html", context)

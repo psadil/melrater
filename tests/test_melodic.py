@@ -11,6 +11,7 @@ from tests.conftest import (
     N_COMPONENTS,
     N_TIMEPOINTS,
     TR,
+    anat_run_inputs,
     run_inputs,
 )
 
@@ -158,3 +159,17 @@ def test_fix_file_with_an_unknown_label_is_refused(tmp_path) -> None:
     # Act / Assert
     with pytest.raises(ValueError, match="Maybe"):
         melodic.parse_fix_file(path)
+
+
+def test_a_registration_without_its_transform_is_not_used(
+    anat_melodic_dir: Path,
+) -> None:
+    # Arrange: the structural resolved, the .mat did not
+    inputs = dataclasses.replace(anat_run_inputs(anat_melodic_dir), highres2func=None)
+
+    # Act
+    source = melodic.load_run(inputs)
+
+    # Assert: both or neither — an anatomical with no way onto the functional
+    # grid is not a background, and the pairing is enforced in one place
+    assert source.anat_path is None
