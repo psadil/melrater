@@ -278,6 +278,9 @@ INGEST_ENABLED = env.bool("MELRATER_INGEST_ENABLED", default=DEBUG)
 # DATA_UPLOAD_MAX_MEMORY_SIZE is calculated excluding file upload data, so its
 # 2.5 MB default keeps guarding /accounts/login/ and the rating POST untouched
 # while a 2.5 MB run payload sails past it.
+# Raise this and the proxy repo's Caddyfile together: its `request_body @api`
+# limit on /melrater/api/* has to stay above this one, or the edge refuses the
+# largest runs with an empty-bodied 413 that never reaches this process.
 INGEST_MAX_TAR_BYTES = env.int(
     "MELRATER_INGEST_MAX_TAR_BYTES", default=256 * 1024 * 1024
 )
