@@ -168,6 +168,7 @@ def _component_context(run: Run, component: Component, user: AbstractBaseUser) -
     indices = list(run.components.values_list("index", flat=True).order_by("index"))
     n_total = len(indices)
     user_labels = selectors.user_labels_for_run(run, user)
+    notes = selectors.notes_for_component(component, user)
     prob_entries, threshold = selectors.prob_entries_for_run(run, user_labels)
     prob_strip = (
         charts.prob_strip_svg(
@@ -195,6 +196,11 @@ def _component_context(run: Run, component: Component, user: AbstractBaseUser) -
         "fix_rows": selectors.fix_verdicts_for_component(component),
         "prob_strip": prob_strip,
         "user_label": user_labels.get(index),
+        "notes": notes,
+        # The standing pre-rating warning. `component_note` overrides it with
+        # the transient "saved" after a write that landed.
+        "note_state": "" if notes.rated else "pending",
+        "note_max_length": services.NOTE_MAX_LENGTH,
         "n_rated": len(user_labels),
         "tc_fd_svg": charts.timecourse_fd_svg(
             comp.timecourse, run_data.fd, run_data.tr
@@ -315,7 +321,13 @@ def component_rate(request: HttpRequest, run_id: int, index: int) -> HttpRespons
     component = get_object_or_404(Component, run=run, index=index)
     try:
         services.rate_component(
-            user=user, component=component, label=request.POST.get("label", "")
+            user=user,
+            component=component,
+            label=request.POST.get("label", ""),
+            # .get("note"), not .get("note", ""): absent means "leave it
+            # alone", and a default of "" would blank the note on every
+            # rating POST that did not happen to include the textarea.
+            note=request.POST.get("note"),
         )
     except ValueError as exc:
         return HttpResponseBadRequest(str(exc), content_type="text/plain")
@@ -324,3 +336,37 @@ def component_rate(request: HttpRequest, run_id: int, index: int) -> HttpRespons
     context["active_background"] = _active_background(request, run)
     context["active_smoothing"] = _active_smoothing(request, run)
     return render(request, "core/partials/rate_response.html", context)
+
+
+@login_required
+@require_http_methods(["POST"])
+def component_note(request: HttpRequest, run_id: int, index: int) -> HttpResponse:
+    """Save the note on its own, when the textarea loses focus.
+
+    Its own endpoint because auto-advance navigates the instant the ratebar
+    swaps, so a note must not depend on that request finishing; the rating
+    POST carries the note too, which is what covers the reviewer who types and
+    then rates in one motion.
+
+    Answers with the status span alone: re-rendering the card would rebuild
+    the whole component context -- charts, montage frames, the metric panel --
+    to say one word, and would replace a textarea the reviewer may be back
+    inside. "No rating yet" is a 200, not a conflict status, because htmx does
+    not swap a 4xx body: a refusal would show the reviewer nothing at all,
+    which is the silent loss this status exists to prevent.
+    """
+    run = get_object_or_404(Run, pk=run_id)
+    component = get_object_or_404(Component, run=run, index=index)
+    try:
+        stored = services.set_component_note(
+            user=_authed_user(request),
+            component=component,
+            note=request.POST.get("note", ""),
+        )
+    except ValueError as exc:
+        return HttpResponseBadRequest(str(exc), content_type="text/plain")
+    return render(
+        request,
+        "core/partials/note_status.html",
+        {"note_state": "saved" if stored is not None else "pending"},
+    )

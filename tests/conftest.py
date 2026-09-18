@@ -200,6 +200,12 @@ def user(django_user_model):
 
 
 @pytest.fixture
+def other_rater(django_user_model):
+    """A second human reviewer, whose notes the first one may or may not see."""
+    return django_user_model.objects.create_user("colleague", password="pw")
+
+
+@pytest.fixture
 def bare_runs(db):
     """Make Run+Component rows directly, with no montage rendering.
 

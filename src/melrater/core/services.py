@@ -44,15 +44,72 @@ def reviewer_for_user(user: AbstractBaseUser) -> Reviewer:
     return reviewer
 
 
+#: Longest note the rating page stores. Bounded here rather than on the column
+#: because a TextField has no cap in SQLite, and the limit is a policy about
+#: what a rating note is for -- a sentence or two of rationale -- not a storage
+#: fact. Generous for that, small enough that a stray paste is caught at the
+#: boundary instead of landing in the study's output.
+NOTE_MAX_LENGTH = 2000
+
+
+def _clean_note(note: str) -> str:
+    """Normalise and bound one note, raising ValueError as `label` does."""
+    cleaned = note.strip()
+    if len(cleaned) > NOTE_MAX_LENGTH:
+        raise ValueError(
+            f"note is {len(cleaned)} characters; the limit is {NOTE_MAX_LENGTH}"
+        )
+    return cleaned
+
+
 def rate_component(
-    *, user: AbstractBaseUser, component: Component, label: str
+    *,
+    user: AbstractBaseUser,
+    component: Component,
+    label: str,
+    note: str | None = None,
 ) -> Classification:
+    """Store one reviewer's label, and their note when one was sent.
+
+    `note=None` means "leave whatever is there alone" -- a caller that has no
+    note must not blank one, and `update_or_create` blanks everything it is
+    handed. `note=""` is a real value: it clears the note.
+    """
     if label not in Classification.Label.values:
         raise ValueError(f"invalid label: {label!r}")
+    defaults: dict[str, str] = {"label": label}
+    if note is not None:
+        defaults["note"] = _clean_note(note)
     reviewer = reviewer_for_user(user)
     classification, _ = Classification.objects.update_or_create(
-        component=component, reviewer=reviewer, defaults={"label": label}
+        component=component, reviewer=reviewer, defaults=defaults
     )
+    return classification
+
+
+def set_component_note(
+    *, user: AbstractBaseUser, component: Component, note: str
+) -> Classification | None:
+    """Store a note on an existing rating; None when there is no rating yet.
+
+    Refuses to create the row rather than inventing a label: a Classification
+    is a decision, and a note is a gloss on one. The page's other save path --
+    the note riding along with the rating POST -- is what covers the reviewer
+    who types before deciding.
+    """
+    # Before the existence check, so an over-length note is refused whether or
+    # not this reviewer has rated.
+    cleaned = _clean_note(note)
+    reviewer = reviewer_for_user(user)
+    classification = Classification.objects.filter(
+        component=component, reviewer=reviewer
+    ).first()
+    if classification is None:
+        return None
+    classification.note = cleaned
+    # `updated_at` is auto_now, and auto_now only fires for fields named in
+    # update_fields -- omitting it would leave the column lying about the row.
+    classification.save(update_fields=("note", "updated_at"))
     return classification
 
 

@@ -133,6 +133,246 @@ def test_rate_post_rejects_bad_label(logged_in, ingested_run: Run) -> None:
     assert response.status_code == 400
 
 
+# --- notes -------------------------------------------------------------
+
+
+def _component(run: Run, index: int = 2):
+    return run.components.get(index=index)
+
+
+#: A sentinel rather than plausible prose. The page's own help text discusses
+#: sagittal sinus, edge rings and every other look-alike, so a realistic note
+#: would match copy that was on the page already and the leak assertion below
+#: would pass without proving anything.
+OTHER_NOTE = "quokka-on-a-bicycle"
+
+
+def test_rate_post_saves_a_note_sent_with_the_rating(
+    logged_in, ingested_run: Run, user
+) -> None:
+    # Act
+    logged_in.post(
+        f"/runs/{ingested_run.pk}/ic/2/rate/", {"label": "Noise", "note": "edge ring"}
+    )
+
+    # Assert
+    assert Classification.objects.get(reviewer__user=user, component__index=2).note == (
+        "edge ring"
+    )
+
+
+def test_rate_post_without_a_note_keeps_the_existing_one(
+    logged_in, ingested_run: Run, user
+) -> None:
+    # Arrange: pins .get("note") over .get("note", "") in the view
+    services.rate_component(
+        user=user, component=_component(ingested_run), label="Noise", note="edge ring"
+    )
+
+    # Act
+    logged_in.post(f"/runs/{ingested_run.pk}/ic/2/rate/", {"label": "Signal"})
+
+    # Assert
+    assert Classification.objects.get(reviewer__user=user, component__index=2).note == (
+        "edge ring"
+    )
+
+
+def test_component_page_hides_other_notes_before_you_rate(
+    logged_in, ingested_run: Run, other_rater
+) -> None:
+    # Arrange: the independence property -- a gate in the template would still
+    # have shipped this text to the browser
+    services.rate_component(
+        user=other_rater,
+        component=_component(ingested_run),
+        label="Noise",
+        note=OTHER_NOTE,
+    )
+
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/")
+
+    # Assert
+    assert OTHER_NOTE not in response.content.decode()
+
+
+def test_component_page_shows_other_notes_once_you_have_rated(
+    logged_in, ingested_run: Run, user, other_rater
+) -> None:
+    # Arrange
+    component = _component(ingested_run)
+    services.rate_component(
+        user=other_rater, component=component, label="Noise", note=OTHER_NOTE
+    )
+    services.rate_component(user=user, component=component, label="Signal")
+
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/")
+
+    # Assert
+    assert OTHER_NOTE in response.content.decode()
+
+
+def test_rate_post_reveals_other_notes(
+    logged_in, ingested_run: Run, other_rater
+) -> None:
+    # Arrange: rating is what opens the card, in the same response
+    services.rate_component(
+        user=other_rater,
+        component=_component(ingested_run),
+        label="Noise",
+        note=OTHER_NOTE,
+    )
+
+    # Act
+    response = logged_in.post(
+        f"/runs/{ingested_run.pk}/ic/2/rate/", {"label": "Signal"}
+    )
+
+    # Assert
+    assert OTHER_NOTE in response.content.decode()
+
+
+def test_rate_post_refreshes_the_note_card_out_of_band(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    response = logged_in.post(f"/runs/{ingested_run.pk}/ic/2/rate/", {"label": "Noise"})
+
+    # Assert
+    assert 'id="note-card"' in response.content.decode()
+
+
+def test_component_page_wires_the_note_into_the_rating_post(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/")
+
+    # Assert: without this the note would race auto-advance's navigation
+    assert 'hx-include="#note-text"' in response.content.decode()
+
+
+def test_component_page_warns_a_note_is_not_stored_until_you_rate(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/")
+
+    # Assert
+    assert "not saved until you rate" in response.content.decode()
+
+
+def test_note_post_stores_the_note(logged_in, ingested_run: Run, user) -> None:
+    # Arrange
+    services.rate_component(
+        user=user, component=_component(ingested_run), label="Noise"
+    )
+
+    # Act
+    logged_in.post(f"/runs/{ingested_run.pk}/ic/2/note/", {"note": "edge ring"})
+
+    # Assert
+    assert Classification.objects.get(reviewer__user=user, component__index=2).note == (
+        "edge ring"
+    )
+
+
+def test_note_post_does_not_change_the_label(
+    logged_in, ingested_run: Run, user
+) -> None:
+    # Arrange
+    services.rate_component(
+        user=user, component=_component(ingested_run), label="Noise"
+    )
+
+    # Act
+    logged_in.post(f"/runs/{ingested_run.pk}/ic/2/note/", {"note": "edge ring"})
+
+    # Assert
+    assert (
+        Classification.objects.get(reviewer__user=user, component__index=2).label
+        == "Noise"
+    )
+
+
+def test_note_post_without_a_rating_stores_nothing(
+    logged_in, ingested_run: Run, user
+) -> None:
+    # Act
+    logged_in.post(f"/runs/{ingested_run.pk}/ic/2/note/", {"note": "edge ring"})
+
+    # Assert: no label invented on the reviewer's behalf. Scoped to this human
+    # -- an ingested run already carries a FIX classification per component.
+    assert not Classification.objects.filter(
+        reviewer__user=user, component__index=2
+    ).exists()
+
+
+def test_note_post_without_a_rating_answers_200(logged_in, ingested_run: Run) -> None:
+    # Act
+    response = logged_in.post(
+        f"/runs/{ingested_run.pk}/ic/2/note/", {"note": "edge ring"}
+    )
+
+    # Assert: htmx does not swap a 4xx body, so a refusal would say nothing
+    assert response.status_code == 200
+
+
+def test_note_post_without_a_rating_says_it_was_not_saved(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    response = logged_in.post(
+        f"/runs/{ingested_run.pk}/ic/2/note/", {"note": "edge ring"}
+    )
+
+    # Assert
+    assert "not saved until you rate" in response.content.decode()
+
+
+def test_note_post_confirms_a_note_that_landed(
+    logged_in, ingested_run: Run, user
+) -> None:
+    # Arrange
+    services.rate_component(
+        user=user, component=_component(ingested_run), label="Noise"
+    )
+
+    # Act
+    response = logged_in.post(
+        f"/runs/{ingested_run.pk}/ic/2/note/", {"note": "edge ring"}
+    )
+
+    # Assert
+    assert ">saved<" in response.content.decode()
+
+
+def test_note_post_rejects_an_overlong_note(logged_in, ingested_run: Run, user) -> None:
+    # Arrange
+    services.rate_component(
+        user=user, component=_component(ingested_run), label="Noise"
+    )
+
+    # Act
+    response = logged_in.post(
+        f"/runs/{ingested_run.pk}/ic/2/note/",
+        {"note": "x" * (services.NOTE_MAX_LENGTH + 1)},
+    )
+
+    # Assert
+    assert response.status_code == 400
+
+
+def test_note_post_requires_login(client, ingested_run: Run) -> None:
+    # Act
+    response = client.post(f"/runs/{ingested_run.pk}/ic/2/note/", {"note": "hm"})
+
+    # Assert
+    assert response.url.startswith("/accounts/login/")
+
+
 def test_default_axis_is_axial(logged_in, ingested_run: Run) -> None:
     # Act
     response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")

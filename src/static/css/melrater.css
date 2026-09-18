@@ -137,6 +137,34 @@ img[data-bg-img="func"] { image-rendering: pixelated; }
 .verdict-unknown { color: var(--unknown); }
 .verdict-p { color: var(--text); }
 .verdict-p em { color: var(--muted); font-style: normal; font-size: 11px; }
+
+/* --- note card: the one interactive control in the scrolling side column --- */
+.note-text {
+  width: 100%; resize: vertical; background: var(--panel2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+  font: inherit;
+}
+.note-text:focus-visible { outline: none; border-color: var(--accent); }
+/* .card-title uppercases and letter-spaces its children, so a status written
+   as a sentence has to opt out -- the same inherited-text problem .help-pop
+   documents further down. */
+.note-status {
+  text-transform: none; letter-spacing: normal; font-size: 11px;
+  color: var(--muted); white-space: nowrap;
+}
+.note-saved { color: var(--signal); }
+.note-pending { color: var(--unknown); }
+.note-row { margin-top: 10px; }
+.note-meta { display: flex; gap: 6px; align-items: center; margin-bottom: 2px; }
+/* .verdict is 15px/700 for the FIX card's headline; beside a note it is a tag */
+.note-meta .verdict { font-size: 11px; }
+.note-when { color: var(--muted); font-size: 11px; margin-left: auto; }
+/* pre-wrap because notes have newlines; anywhere so a pasted path cannot blow
+   out the 400px column. */
+.note-body {
+  color: var(--text); font-size: 12px; border-left: 2px solid var(--border);
+  padding-left: 8px; white-space: pre-wrap; overflow-wrap: anywhere;
+}
 .strip-legend { color: var(--muted); font-size: 11px; margin-top: 4px; }
 
 /* metrics panel */

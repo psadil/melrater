@@ -247,6 +247,126 @@ def test_rate_component_rejects_bad_label(ingested_run: Run, user) -> None:
         services.rate_component(user=user, component=component, label="Artifact")
 
 
+# --- notes -------------------------------------------------------------
+
+
+def test_rate_component_stores_a_note_sent_with_the_rating(
+    ingested_run: Run, user
+) -> None:
+    # Arrange
+    component = Component.objects.get(run=ingested_run, index=2)
+
+    # Act
+    rating = services.rate_component(
+        user=user, component=component, label="Noise", note="sagittal sinus"
+    )
+
+    # Assert
+    assert rating.note == "sagittal sinus"
+
+
+def test_rate_component_without_a_note_leaves_an_existing_one(
+    ingested_run: Run, user
+) -> None:
+    # Arrange: a note is already on the row
+    component = Component.objects.get(run=ingested_run, index=2)
+    services.rate_component(
+        user=user, component=component, label="Noise", note="sagittal sinus"
+    )
+
+    # Act: changing only the label must not blank it
+    rating = services.rate_component(user=user, component=component, label="Signal")
+
+    # Assert
+    assert rating.note == "sagittal sinus"
+
+
+def test_rate_component_with_an_empty_note_clears_it(ingested_run: Run, user) -> None:
+    # Arrange: "" is a real value, unlike None
+    component = Component.objects.get(run=ingested_run, index=2)
+    services.rate_component(
+        user=user, component=component, label="Noise", note="sagittal sinus"
+    )
+
+    # Act
+    rating = services.rate_component(
+        user=user, component=component, label="Noise", note=""
+    )
+
+    # Assert
+    assert rating.note == ""
+
+
+def test_rate_component_rejects_an_overlong_note(ingested_run: Run, user) -> None:
+    # Arrange
+    component = Component.objects.get(run=ingested_run, index=1)
+
+    # Act / Assert
+    with pytest.raises(ValueError, match="the limit is"):
+        services.rate_component(
+            user=user,
+            component=component,
+            label="Noise",
+            note="x" * (services.NOTE_MAX_LENGTH + 1),
+        )
+
+
+def test_set_component_note_stores_the_note(ingested_run: Run, user) -> None:
+    # Arrange
+    component = Component.objects.get(run=ingested_run, index=2)
+    services.rate_component(user=user, component=component, label="Noise")
+
+    # Act
+    stored = services.set_component_note(
+        user=user, component=component, note="  edge ring  "
+    )
+
+    # Assert: stored, stripped
+    assert stored is not None and stored.note == "edge ring"
+
+
+def test_set_component_note_leaves_the_label_alone(ingested_run: Run, user) -> None:
+    # Arrange
+    component = Component.objects.get(run=ingested_run, index=2)
+    services.rate_component(user=user, component=component, label="Noise")
+
+    # Act
+    stored = services.set_component_note(user=user, component=component, note="hm")
+
+    # Assert
+    assert stored is not None and stored.label == "Noise"
+
+
+def test_set_component_note_refuses_before_a_rating(ingested_run: Run, user) -> None:
+    # Arrange: nothing rated -- a note has no row to live on
+    component = Component.objects.get(run=ingested_run, index=2)
+
+    # Act
+    stored = services.set_component_note(user=user, component=component, note="hm")
+
+    # Assert: refused, and no label invented on the reviewer's behalf. Scoped
+    # to this human -- an ingested run already carries a FIX classification
+    # for every component.
+    assert (
+        stored,
+        Classification.objects.filter(
+            component=component, reviewer__user=user
+        ).exists(),
+    ) == (None, False)
+
+
+def test_set_component_note_rejects_an_overlong_note(ingested_run: Run, user) -> None:
+    # Arrange
+    component = Component.objects.get(run=ingested_run, index=2)
+    services.rate_component(user=user, component=component, label="Noise")
+
+    # Act / Assert
+    with pytest.raises(ValueError, match="the limit is"):
+        services.set_component_note(
+            user=user, component=component, note="x" * (services.NOTE_MAX_LENGTH + 1)
+        )
+
+
 def test_deleting_a_rater_is_refused_while_they_have_ratings(
     ingested_run: Run, user
 ) -> None:

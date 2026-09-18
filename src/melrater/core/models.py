@@ -205,6 +205,14 @@ class Classification(models.Model):
         Reviewer, on_delete=models.CASCADE, related_name="classifications"
     )
     label = models.CharField(max_length=10, choices=Label.choices)
+    # Free text, shared with the other human reviewers only once they have
+    # rated this component themselves (selectors.notes_for_component is the
+    # gate). On the row rather than in a table of its own because the study's
+    # output is queried by hand out of the SQLite file, and a note is worth
+    # little without the label beside it. Length is bounded in services, not
+    # here: a TextField has no cap in SQLite, and the limit is a policy about
+    # what a rating note is for rather than a storage fact.
+    note = models.TextField(blank=True, default="")
     probability = models.FloatField(
         null=True, blank=True, help_text="FIX P(signal), when the reviewer is FIX"
     )

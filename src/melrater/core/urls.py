@@ -14,6 +14,11 @@ urlpatterns = [
         views.component_rate,
         name="component-rate",
     ),
+    path(
+        "runs/<int:run_id>/ic/<int:index>/note/",
+        views.component_note,
+        name="component-note",
+    ),
     path("prefs/axis/", views.set_axis, name="set-axis"),
     path("prefs/background/", views.set_background, name="set-background"),
     path("prefs/smoothing/", views.set_smoothing, name="set-smoothing"),

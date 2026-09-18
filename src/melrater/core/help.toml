@@ -181,6 +181,21 @@ bullets = [
 ]
 refs = ["griffanti2017"]
 
+[field.note]
+title = "notes"
+body = """
+A free-text note on this component, stored against your own rating. Other \
+human reviewers' notes stay hidden until you have rated the component \
+yourself: a note usually gives away the label it explains, and a judgement \
+formed after reading somebody else's reasoning is no longer independent, \
+which is what any later measure of agreement between reviewers rests on."""
+bullets = [
+  "the note is saved when you click away from the box, and again with the label when you rate — so typing a note and then rating stores both, even with auto-advance on",
+  "there is nowhere to keep a note before you rate, because it lives on the rating; until then the box says so",
+  "worth writing: what made the call hard, a look-alike you ruled out, or another component in the run that belongs with this one",
+  "press c to jump to the box, escape to leave it",
+]
+
 [field.fix_verdict]
 title = "FIX verdict"
 body = """

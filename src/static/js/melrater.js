@@ -122,6 +122,12 @@
   };
 
   document.addEventListener("keydown", (e) => {
+    // Before the isTyping bail, or it could never fire: escape is the way back
+    // out of the note box, and blurring it is what triggers htmx's save.
+    if (e.key === "Escape" && e.target.id === "note-text") {
+      e.target.blur();
+      return;
+    }
     if (isTyping(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
     const rate = (label) =>
       document.querySelector(`#ratebar [data-rate="${label}"]`)?.click();
@@ -141,11 +147,19 @@
     else if (e.key === "b") cycle("[data-bg-btn]");
     else if (e.key === "m") cycle("[data-sm-btn]");
     else if (e.key === "o") cycle("[data-axis-btn]");
+    // Both re-query the element rather than holding a reference: the note card
+    // is replaced out of band on every rating.
     else if (e.key === "g") {
       const jump = document.getElementById("jump");
       if (jump) {
         jump.focus();
         e.preventDefault();
+      }
+    } else if (e.key === "c") {
+      const note = document.getElementById("note-text");
+      if (note) {
+        note.focus();
+        e.preventDefault();  // or the c lands in the box
       }
     }
   });

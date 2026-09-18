@@ -1,0 +1,1 @@
+<span class="note-status note-{{ note_state|default:'idle' }}" id="note-status">{% if note_state == "saved" %}saved{% elif note_state == "pending" %}not saved until you rate{% endif %}</span>

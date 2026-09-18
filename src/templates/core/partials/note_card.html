@@ -1,0 +1,35 @@
+{% load help_tags %}
+<div class="card" id="note-card"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <div class="card-title"><span class="card-title-text">notes
+    {% help_bubble "field.note" %}</span>
+    {% include "core/partials/note_status.html" %}
+  </div>
+  {% comment %}
+    No whitespace between the tag and the value: everything between <textarea>
+    and </textarea> is the value, so an indent would come back as leading
+    spaces on every round trip. htmx posts a triggering textarea's own value
+    under its name, so this needs no hx-include of its own.
+  {% endcomment %}
+  <textarea class="note-text" id="note-text" name="note" rows="3"
+            maxlength="{{ note_max_length }}"
+            placeholder="why this call?"
+            hx-post="{% url 'component-note' run.pk component.index %}"
+            hx-trigger="change"
+            hx-target="#note-status" hx-swap="outerHTML">{{ notes.mine }}</textarea>
+  {% for n in notes.others %}
+    <div class="note-row">
+      <div class="note-meta">
+        <span class="meta-chip">{{ n.reviewer }}</span>
+        <span class="verdict verdict-{{ n.label|lower }}">{{ n.label|upper }}</span>
+        <span class="note-when">{{ n.updated_at|timesince }} ago</span>
+      </div>
+      <p class="note-body">{{ n.note }}</p>
+    </div>
+  {% empty %}
+    {% comment %}
+      Guarded on `rated`: an unrated reviewer must not learn even that somebody
+      else wrote something, which is half of what the delay protects.
+    {% endcomment %}
+    {% if notes.rated %}<div class="muted">no other reviewer has left a note</div>{% endif %}
+  {% endfor %}
+</div>

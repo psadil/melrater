@@ -1,7 +1,12 @@
 {% load help_tags %}
 <div class="ratebar" id="ratebar"
      {% if next_index %}data-next-url="{% url 'component-detail' run.pk next_index %}"{% endif %}>
-  <div class="rate-buttons">
+  {% comment %}
+    hx-include is inherited, so one attribute here covers all three buttons.
+    The rating POST carries the note so that auto-advance -- which navigates
+    the moment this bar swaps -- cannot race the textarea's own blur save.
+  {% endcomment %}
+  <div class="rate-buttons" hx-include="#note-text">
     {% for b in rating_buttons %}
       <button class="rate rate-{{ b.label|lower }}{% if user_label == b.label %} selected{% endif %}"
               data-rate="{{ b.label }}"

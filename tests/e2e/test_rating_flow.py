@@ -360,3 +360,68 @@ def test_the_frame_is_pinned_to_twice_the_voxel_grid(
 
     # Assert
     assert width == 2 * 5 * 6
+
+
+def test_a_note_typed_before_rating_rides_along_with_the_rating(
+    logged_in_page, live_server, ingested_run: Run, user
+) -> None:
+    """The note reaches the database even when auto-advance navigates away.
+
+    Deliberately on an unrated component: `fill` dispatches `change`, so the
+    blur endpoint does fire, but with no rating yet it stores nothing by
+    construction. The only path left is the note riding along with the rating
+    POST -- which is the path that has to win the race against auto-advance.
+    """
+    # Arrange
+    logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
+    logged_in_page.check("[data-auto-advance]")
+    logged_in_page.fill("#note-text", "quokka-on-a-bicycle")
+
+    # Act
+    logged_in_page.click("button.rate-noise")
+    logged_in_page.wait_for_url("**/ic/2/")
+
+    # Assert
+    assert (
+        Classification.objects.get(reviewer__user=user, component__index=1).note
+        == "quokka-on-a-bicycle"
+    )
+
+
+def test_blurring_the_note_box_saves_it(
+    logged_in_page, live_server, ingested_run: Run, user
+) -> None:
+    """The other save path: no rating click, just focus leaving the textarea."""
+    # Arrange: a rating already exists, so the note has a row to land on
+    logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
+    logged_in_page.click("button.rate-noise")
+    logged_in_page.wait_for_selector("button.rate-noise.selected")
+
+    # Act: fill dispatches change, which is what hx-trigger listens for
+    logged_in_page.fill("#note-text", "quokka-on-a-bicycle")
+    logged_in_page.click("#jump")
+    logged_in_page.wait_for_selector("#note-status.note-saved")
+
+    # Assert
+    assert (
+        Classification.objects.get(reviewer__user=user, component__index=1).note
+        == "quokka-on-a-bicycle"
+    )
+
+
+def test_typing_in_the_note_box_does_not_rate(
+    logged_in_page, live_server, ingested_run: Run, user
+) -> None:
+    """c focuses the box, and the rating hotkeys become ordinary letters in it."""
+    # Arrange
+    logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
+
+    # Act: s and n would otherwise rate Signal and Noise
+    logged_in_page.keyboard.press("c")
+    logged_in_page.keyboard.type("sn")
+
+    # Assert: the letters landed in the box and rated nothing
+    assert (
+        logged_in_page.input_value("#note-text"),
+        Classification.objects.filter(reviewer__user=user).exists(),
+    ) == ("sn", False)
