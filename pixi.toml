@@ -103,12 +103,15 @@ gxx_linux-64 = "*"
 pillow-avif-plugin = "*"
 django-typer = "*"
 # bidslake query layer: typed access to the catalog `import_run` reads, pinned to
-# a rev (built from git via maturin/rust at install time). The pin is the first
-# rev whose feat adapter carries everything melrater needs: the
-# `spectrum`/`metrics` suffixes, the melodic_ftmix/melodic_icstats/melodic_mean/
-# fix_features roles, and the `feat_icstats` table. Catalogs must be indexed with
-# a `bidslake` CLI built from this rev or later.
-bidslake = { git = "https://github.com/psadil/bidslake.git", rev = "93d6e6dfa6a65dc667b256d8365220adf04c7951", subdirectory = "crates/bidslake-py" }
+# a rev (built from git via maturin/rust at install time). Everything melrater
+# needs arrived at 93d6e6d: the `spectrum`/`metrics` suffixes, the
+# melodic_ftmix/melodic_icstats/melodic_mean/fix_features roles, and the
+# `feat_icstats` table. 2e0e468 adds the `design` role (FEAT's design.fsf,
+# `suffix-design`/`desc-FEAT`), which melrater does not read but the melodic
+# pipeline writes; pinning the same rev keeps the CLI that indexes those trees
+# and this query layer on one vocabulary. Catalogs must be indexed with a
+# `bidslake` CLI built from this rev or later.
+bidslake = { git = "https://github.com/psadil/bidslake.git", rev = "2e0e4683c4634a6f0cd2108393a73d4bc1c10edc", subdirectory = "crates/bidslake-py" }
 
 [feature.dev.tasks]
 test = "pytest"

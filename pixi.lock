@@ -116,7 +116,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.16.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.0-pyhcf101f3_0.conda
-      - pypi: git+https://github.com/psadil/bidslake.git?subdirectory=crates%2Fbidslake-py&rev=93d6e6dfa6a65dc667b256d8365220adf04c7951#93d6e6dfa6a65dc667b256d8365220adf04c7951
+      - pypi: git+https://github.com/psadil/bidslake.git?subdirectory=crates%2Fbidslake-py&rev=2e0e4683c4634a6f0cd2108393a73d4bc1c10edc#2e0e4683c4634a6f0cd2108393a73d4bc1c10edc
       - pypi: https://files.pythonhosted.org/packages/11/6c/5b9a9ae55260c4ef93dbe0edae7cb4da8daf47af1c8d93fe90b3e31f1956/pillow_avif_plugin-1.6.0-cp314-cp314-manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/3a/f1/59154659081930fbde291ea6225607956b500a71b0ce45d88217b7d32da2/polars-1.44.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/3e/30/e900b21425a860e195f32e37657aa1f7c7f2b1bfb26f03ca209b90933c06/annotated_doc-0.0.5-py3-none-any.whl
@@ -218,7 +218,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/xorg-libxdmcp-1.1.5-h84a0fba_2.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zlib-ng-2.3.3-h31dac16_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hf451053_7.conda
-      - pypi: git+https://github.com/psadil/bidslake.git?subdirectory=crates%2Fbidslake-py&rev=93d6e6dfa6a65dc667b256d8365220adf04c7951#93d6e6dfa6a65dc667b256d8365220adf04c7951
+      - pypi: git+https://github.com/psadil/bidslake.git?subdirectory=crates%2Fbidslake-py&rev=2e0e4683c4634a6f0cd2108393a73d4bc1c10edc#2e0e4683c4634a6f0cd2108393a73d4bc1c10edc
       - pypi: https://files.pythonhosted.org/packages/10/da/38b32b7901af33f1fee2172ceaa39e9159825657920064298917392d78fa/polars_runtime_32-1.44.1-cp310-abi3-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/3a/f1/59154659081930fbde291ea6225607956b500a71b0ce45d88217b7d32da2/polars-1.44.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/3e/30/e900b21425a860e195f32e37657aa1f7c7f2b1bfb26f03ca209b90933c06/annotated_doc-0.0.5-py3-none-any.whl
@@ -375,7 +375,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/urllib3-2.7.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.0-pyhcf101f3_0.conda
-      - pypi: git+https://github.com/psadil/bidslake.git?subdirectory=crates%2Fbidslake-py&rev=93d6e6dfa6a65dc667b256d8365220adf04c7951#93d6e6dfa6a65dc667b256d8365220adf04c7951
+      - pypi: git+https://github.com/psadil/bidslake.git?subdirectory=crates%2Fbidslake-py&rev=2e0e4683c4634a6f0cd2108393a73d4bc1c10edc#2e0e4683c4634a6f0cd2108393a73d4bc1c10edc
       - pypi: https://files.pythonhosted.org/packages/11/6c/5b9a9ae55260c4ef93dbe0edae7cb4da8daf47af1c8d93fe90b3e31f1956/pillow_avif_plugin-1.6.0-cp314-cp314-manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/3a/f1/59154659081930fbde291ea6225607956b500a71b0ce45d88217b7d32da2/polars-1.44.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/3e/30/e900b21425a860e195f32e37657aa1f7c7f2b1bfb26f03ca209b90933c06/annotated_doc-0.0.5-py3-none-any.whl
@@ -512,7 +512,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/xorg-libxdmcp-1.1.5-h84a0fba_2.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zlib-ng-2.3.3-h31dac16_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hf451053_7.conda
-      - pypi: git+https://github.com/psadil/bidslake.git?subdirectory=crates%2Fbidslake-py&rev=93d6e6dfa6a65dc667b256d8365220adf04c7951#93d6e6dfa6a65dc667b256d8365220adf04c7951
+      - pypi: git+https://github.com/psadil/bidslake.git?subdirectory=crates%2Fbidslake-py&rev=2e0e4683c4634a6f0cd2108393a73d4bc1c10edc#2e0e4683c4634a6f0cd2108393a73d4bc1c10edc
       - pypi: https://files.pythonhosted.org/packages/10/da/38b32b7901af33f1fee2172ceaa39e9159825657920064298917392d78fa/polars_runtime_32-1.44.1-cp310-abi3-macosx_11_0_arm64.whl
       - pypi: https://files.pythonhosted.org/packages/3a/f1/59154659081930fbde291ea6225607956b500a71b0ce45d88217b7d32da2/polars-1.44.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/3e/30/e900b21425a860e195f32e37657aa1f7c7f2b1bfb26f03ca209b90933c06/annotated_doc-0.0.5-py3-none-any.whl
@@ -631,7 +631,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.16.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.0-pyhcf101f3_0.conda
-      - pypi: git+https://github.com/psadil/bidslake.git?subdirectory=crates%2Fbidslake-py&rev=93d6e6dfa6a65dc667b256d8365220adf04c7951#93d6e6dfa6a65dc667b256d8365220adf04c7951
+      - pypi: git+https://github.com/psadil/bidslake.git?subdirectory=crates%2Fbidslake-py&rev=2e0e4683c4634a6f0cd2108393a73d4bc1c10edc#2e0e4683c4634a6f0cd2108393a73d4bc1c10edc
       - pypi: https://files.pythonhosted.org/packages/11/6c/5b9a9ae55260c4ef93dbe0edae7cb4da8daf47af1c8d93fe90b3e31f1956/pillow_avif_plugin-1.6.0-cp314-cp314-manylinux_2_28_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/12/ec/0a7d50f3900797aef5efb145c5c42fb8d56a465cca2388b45f12c67b9560/django_typer-4.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/3e/30/e900b21425a860e195f32e37657aa1f7c7f2b1bfb26f03ca209b90933c06/annotated_doc-0.0.5-py3-none-any.whl
@@ -733,7 +733,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/xorg-libxdmcp-1.1.5-h84a0fba_2.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zlib-ng-2.3.3-h31dac16_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hf451053_7.conda
-      - pypi: git+https://github.com/psadil/bidslake.git?subdirectory=crates%2Fbidslake-py&rev=93d6e6dfa6a65dc667b256d8365220adf04c7951#93d6e6dfa6a65dc667b256d8365220adf04c7951
+      - pypi: git+https://github.com/psadil/bidslake.git?subdirectory=crates%2Fbidslake-py&rev=2e0e4683c4634a6f0cd2108393a73d4bc1c10edc#2e0e4683c4634a6f0cd2108393a73d4bc1c10edc
       - pypi: https://files.pythonhosted.org/packages/12/ec/0a7d50f3900797aef5efb145c5c42fb8d56a465cca2388b45f12c67b9560/django_typer-4.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/3e/30/e900b21425a860e195f32e37657aa1f7c7f2b1bfb26f03ca209b90933c06/annotated_doc-0.0.5-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/51/6d/3014112c7f717d1253223faa13b6db3ac3a64ed00ab2a3bc1b942bc9cdd4/polars-1.44.2-py3-none-any.whl
@@ -1802,7 +1802,7 @@ packages:
   license: MIT
   license_family: MIT
   purls:
-  - pkg:pypi/maturin?source=compressed-mapping
+  - pkg:pypi/maturin?source=hash-mapping
   run_exports: {}
   size: 9320175
   timestamp: 1787908097767
@@ -4181,7 +4181,7 @@ packages:
   license: MIT
   license_family: MIT
   purls:
-  - pkg:pypi/maturin?source=compressed-mapping
+  - pkg:pypi/maturin?source=hash-mapping
   run_exports: {}
   size: 8561448
   timestamp: 1787587876482
@@ -4701,7 +4701,7 @@ packages:
     - zstd >=1.5.7,<1.6.0a0
   size: 433687
   timestamp: 1786599629846
-- pypi: git+https://github.com/psadil/bidslake.git?subdirectory=crates%2Fbidslake-py&rev=93d6e6dfa6a65dc667b256d8365220adf04c7951#93d6e6dfa6a65dc667b256d8365220adf04c7951
+- pypi: git+https://github.com/psadil/bidslake.git?subdirectory=crates%2Fbidslake-py&rev=2e0e4683c4634a6f0cd2108393a73d4bc1c10edc#2e0e4683c4634a6f0cd2108393a73d4bc1c10edc
   name: bidslake
   version: 0.1.0
   requires_dist:
