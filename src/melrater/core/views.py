@@ -15,7 +15,7 @@ from django.http import (
     HttpResponseForbidden,
 )
 from django.shortcuts import get_object_or_404, render
-from django.views.decorators.cache import never_cache
+from django.views.decorators.cache import cache_control
 from django.views.decorators.http import require_http_methods
 from django.views.static import serve
 
@@ -47,6 +47,15 @@ DEFAULT_SMOOTHING = "raw"
 # every image.
 MONTAGE_CACHE_CONTROL = "private, max-age=31536000, immutable"
 
+# Every signed-in page renders one reviewer's own state -- their progress,
+# their note, a thread they have earned access to -- so no shared cache may
+# store one. `private` and not `no-store`: the threat is an intermediary, and
+# the reviewer's own browser is wanted as a cache here, which is the same call
+# MONTAGE_CACHE_CONTROL makes one line up for a year of montages. Django sends
+# no Cache-Control of its own, and the Vary: Cookie that SessionMiddleware
+# patches on is incidental -- it comes from touching the session -- so say it.
+signed_in_page = cache_control(private=True)
+
 
 def _authed_user(request: HttpRequest) -> AbstractBaseUser:
     user = request.user
@@ -56,6 +65,7 @@ def _authed_user(request: HttpRequest) -> AbstractBaseUser:
 
 
 @login_required
+@signed_in_page
 def run_list(request: HttpRequest) -> HttpResponse:
     query = request.GET.get("q", "").strip()
     hide_complete = request.GET.get("hide_complete") == "1"
@@ -250,6 +260,7 @@ def _active_smoothing(request: HttpRequest, run: Run) -> str:
 
 
 @login_required
+@signed_in_page
 def component_detail(request: HttpRequest, run_id: int, index: int) -> HttpResponse:
     run = get_object_or_404(Run, pk=run_id)
     component = get_object_or_404(Component, run=run, index=index)
@@ -422,10 +433,7 @@ def _your_post(
 
 
 @login_required
-# The one page whose entire body is gated per viewer. Django's Vary: Cookie is
-# incidental (it comes from touching the session), and the deployment sits
-# behind a shared proxy; say what is meant instead of relying on that.
-@never_cache
+@signed_in_page
 def component_discussion(request: HttpRequest, run_id: int, index: int) -> HttpResponse:
     run, component = _component_of(run_id, index)
     context = _discussion_context(run, component, _authed_user(request))

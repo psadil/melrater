@@ -1210,10 +1210,19 @@ def test_discussion_delete_refuses_another_reviewers_post(
     assert response.status_code == 404
 
 
-def test_discussion_page_is_not_cacheable(logged_in, ingested_run: Run) -> None:
-    # Assert: the deployment sits behind a shared proxy, and this page's whole
-    # body is gated per viewer. Django's Vary: Cookie is incidental -- it comes
-    # from touching the session -- so the intent is stated in code instead.
-    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/discussion/")
+def test_every_signed_in_page_forbids_a_shared_cache(
+    logged_in, ingested_run: Run
+) -> None:
+    # Arrange: each of these renders one reviewer's own state, and Django sends
+    # no Cache-Control unless a view says so
+    paths = (
+        "/",
+        f"/runs/{ingested_run.pk}/ic/2/",
+        f"/runs/{ingested_run.pk}/ic/2/discussion/",
+    )
 
-    assert "no-store" in response["Cache-Control"]
+    # Assert: `private`, not no-store -- the threat is an intermediary, and the
+    # reviewer's own browser is wanted as a cache, as it is for the montages
+    assert [
+        p for p in paths if "private" not in logged_in.get(p)["Cache-Control"]
+    ] == []
