@@ -125,6 +125,7 @@ class Component(models.Model):
     objects: ClassVar[ComponentManager] = ComponentManager()
 
     classifications: RelatedManager[Classification]
+    posts: RelatedManager[DiscussionPost]
 
     class Meta:
         ordering: ClassVar = ["run", "index"]
@@ -171,6 +172,7 @@ class Reviewer(models.Model):
     objects: ClassVar[ReviewerManager] = ReviewerManager()
 
     classifications: RelatedManager[Classification]
+    posts: RelatedManager[DiscussionPost]
 
     def natural_key(self) -> tuple[str]:
         return (str(self.name),)
@@ -205,13 +207,14 @@ class Classification(models.Model):
         Reviewer, on_delete=models.CASCADE, related_name="classifications"
     )
     label = models.CharField(max_length=10, choices=Label.choices)
-    # Free text, shared with the other human reviewers only once they have
-    # rated this component themselves (selectors.notes_for_component is the
-    # gate). On the row rather than in a table of its own because the study's
-    # output is queried by hand out of the SQLite file, and a note is worth
-    # little without the label beside it. Length is bounded in services, not
-    # here: a TextField has no cap in SQLite, and the limit is a policy about
-    # what a rating note is for rather than a storage fact.
+    # Free text, private to its author: nobody else ever reads it, now or
+    # later. The shared channel is DiscussionPost, which opens to a reviewer
+    # once they have rated. On the row rather than in a table of its own
+    # because the study's output is queried by hand out of the SQLite file,
+    # and a note is worth little without the label beside it. Length is
+    # bounded in services, not here: a TextField has no cap in SQLite, and the
+    # limit is a policy about what a rating note is for rather than a storage
+    # fact.
     note = models.TextField(blank=True, default="")
     probability = models.FloatField(
         null=True, blank=True, help_text="FIX P(signal), when the reviewer is FIX"
@@ -220,6 +223,13 @@ class Classification(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     objects: ClassVar[ClassificationManager] = ClassificationManager()
+
+    # Stub-only, like the reverse accessors above: django-stubs resolves a
+    # ForeignKey's descriptor but not the implicit `<name>_id` column beside
+    # it, and Django ignores an un-assigned annotation, so this creates no
+    # field. Named here because both the discussion gate and its ownership
+    # check compare ids rather than fetching the row.
+    reviewer_id: int
 
     class Meta:
         constraints: ClassVar = [
@@ -235,6 +245,70 @@ class Classification(models.Model):
         return f"{self.reviewer}: {self.component} = {self.label}"
 
 
+class DiscussionPostManager(models.Manager["DiscussionPost"]):
+    def get_by_natural_key(self, uuid: str) -> DiscussionPost:
+        return self.get(uuid=uuid)
+
+
+class DiscussionPost(models.Model):
+    """One human reviewer's message in a component's discussion thread.
+
+    The counterpart to `Classification.note`: a note is its author's alone,
+    this is what reviewers say to each other. Reading and writing both open
+    only once the reviewer has rated the component
+    (`selectors.discussion_for_component` is the gate).
+    """
+
+    # The row's portable identity, as `Run.uuid` is: it names the same post in
+    # every copy of this database, which is what lets the edit and delete URLs
+    # carry it, and (component, reviewer) could not be a natural key because a
+    # reviewer posts many times.
+    uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
+    component = models.ForeignKey(
+        Component, on_delete=models.CASCADE, related_name="posts"
+    )
+    # Reviewer rather than the user directly: `Reviewer.name` is the identity
+    # the page prints, and the gate then joins Classification on reviewer_id
+    # with no auth_user join. Reviewer.user is PROTECT, so deleting an account
+    # still cannot silently take reviewer work with it.
+    reviewer = models.ForeignKey(
+        Reviewer, on_delete=models.CASCADE, related_name="posts"
+    )
+    # The author's label *at the moment they wrote this*, copied rather than
+    # joined. `rate_component` is an update_or_create, so a reviewer may change
+    # their mind at any time; a live join would rewrite the verdict shown
+    # beside every message they ever wrote about this component, and a post
+    # arguing for noise would end up captioned SIGNAL.
+    label = models.CharField(max_length=10, choices=Classification.Label.choices)
+    body = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    # Set explicitly in services, not auto_now: auto_now fires for any save
+    # that names the field and so cannot tell an edit from a touch. None means
+    # never edited, which is what the page renders on.
+    edited_at = models.DateTimeField(null=True, blank=True, default=None)
+
+    objects: ClassVar[DiscussionPostManager] = DiscussionPostManager()
+
+    #: See Classification.reviewer_id.
+    reviewer_id: int
+
+    class Meta:
+        # Oldest first: a thread is read in the order it was written. `id`
+        # breaks the tie for two posts sharing a timestamp.
+        ordering: ClassVar = ["created_at", "id"]
+        indexes: ClassVar = [
+            models.Index(
+                fields=["component", "created_at"], name="post_component_created_idx"
+            )
+        ]
+
+    def natural_key(self) -> tuple[str]:
+        return (str(self.uuid),)
+
+    def __str__(self) -> str:
+        return f"{self.reviewer} on {self.component}"
+
+
 # Django reads `natural_key.dependencies` to order dumpdata's output so that a
 # referenced model is serialized before the model that references it. It is
 # attached out here, through the function's own __dict__, because setting an
@@ -242,3 +316,4 @@ class Classification(models.Model):
 # with no rule overrides (contributing.md). Tuples, per RUF012.
 vars(Component.natural_key)["dependencies"] = ("core.run",)
 vars(Classification.natural_key)["dependencies"] = ("core.component", "core.reviewer")
+vars(DiscussionPost.natural_key)["dependencies"] = ("core.component", "core.reviewer")

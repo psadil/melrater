@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ run.label }} · IC {{ component.index }} · discussion{% endblock %}
+{% block content %}
+<div class="discussion-page">
+  <div class="toolbar">
+    {% if prev_index %}<a id="nav-prev" class="nav-btn" href="{% url 'component-discussion' run.pk prev_index %}">&#8592;</a>
+    {% else %}<span class="nav-btn disabled">&#8592;</span>{% endif %}
+    <span class="pos">IC {{ component.index }} / {{ n_total }}</span>
+    {% if next_index %}<a id="nav-next" class="nav-btn" href="{% url 'component-discussion' run.pk next_index %}">&#8594;</a>
+    {% else %}<span class="nav-btn disabled">&#8594;</span>{% endif %}
+    {% include "core/partials/page_tabs.html" with tab="discussion" %}
+    <span class="meta-chip">{{ run.label }}</span>
+    <span class="toolbar-right">
+      {% if user_label %}
+        <span class="meta-chip">your call</span>
+        <span class="verdict verdict-{{ user_label|lower }}">{{ user_label|upper }}</span>
+      {% else %}
+        <span class="meta-chip">not rated by you</span>
+      {% endif %}
+    </span>
+  </div>
+  <div class="discussion-body">
+    {% include "core/partials/discussion.html" %}
+  </div>
+</div>
+{% endblock %}

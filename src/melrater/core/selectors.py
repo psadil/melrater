@@ -16,7 +16,13 @@ from django.db.models import Count, Min, Q
 from melrater.core import montage, transfer
 from melrater.core import storage as montage_store
 from melrater.core.charts import ProbEntry
-from melrater.core.models import Classification, Component, Reviewer, Run
+from melrater.core.models import (
+    Classification,
+    Component,
+    DiscussionPost,
+    Reviewer,
+    Run,
+)
 from melrater.core.schemas import (
     ComponentData,
     ComponentPayload,
@@ -340,63 +346,112 @@ def fix_verdicts_for_component(component: Component) -> list[FixVerdictRow]:
 
 
 @dataclass(frozen=True)
-class ReviewerNote:
-    """Another human reviewer's note, with the label it explains."""
-
-    reviewer: str
-    label: str
-    note: str
-    updated_at: datetime
-
-
-@dataclass(frozen=True)
 class NotePanel:
     """The note card's whole state for one viewer on one component.
 
-    `others` stays empty until the viewer has rated this component themselves.
-    The gate lives here rather than in the template because a template
-    `{% if %}` would still have put everybody else's reasoning in the HTML
-    source -- and the delay is the whole point: a label formed after reading
-    someone else's note is not an independent one, which is what later
-    inter-rater agreement rests on.
+    A note is its author's alone: nobody else reads it, now or later. It was
+    briefly shared with reviewers who had already rated, and the half of that
+    which was worth keeping -- reviewers reading each other's reasoning -- is
+    now `DiscussionThread`, where it can be answered instead of just seen.
     """
 
     mine: str
     rated: bool
-    others: list[ReviewerNote]
 
 
 def notes_for_component(component: Component, user: AbstractBaseUser) -> NotePanel:
     mine = Classification.objects.filter(
         component=component, reviewer__user=user
     ).first()
-    if mine is None:
-        return NotePanel(mine="", rated=False, others=[])
-    # .exclude(pk=...) rather than .exclude(reviewer__user=user): exact, one
-    # join fewer, and it sidesteps the NULL semantics of excluding across
-    # Reviewer.user, which is null for every FIX reviewer.
-    qs = (
-        Classification.objects.filter(
-            component=component, reviewer__kind=Reviewer.Kind.HUMAN
-        )
-        .exclude(pk=mine.pk)
-        .exclude(note="")
-        .select_related("reviewer")
-        .order_by("-updated_at", "reviewer__name")
+    return NotePanel(mine=str(mine.note) if mine else "", rated=mine is not None)
+
+
+@dataclass(frozen=True)
+class DiscussionPostRow:
+    """One message in a thread, as the page renders it."""
+
+    uuid: UUID
+    reviewer: str
+    label: str
+    body: str
+    created_at: datetime
+    edited_at: datetime | None
+    #: Whether the viewer wrote this one, and so may edit or delete it.
+    #: Decided here so no template ever compares users.
+    mine: bool
+
+
+@dataclass(frozen=True)
+class DiscussionThread:
+    """A component's whole thread for one viewer.
+
+    `posts` stays empty until the viewer has rated this component themselves,
+    and `rated` is the only thing the page may say about it before then -- not
+    a post, not an author, not a count, not that anybody has written at all.
+    The gate lives here rather than in the template, as the note reveal used
+    to: a judgement formed after reading somebody else's reasoning is not an
+    independent one, which is what any later measure of agreement between
+    reviewers rests on.
+    """
+
+    rated: bool
+    posts: list[DiscussionPostRow]
+
+
+def _post_row(post: DiscussionPost, *, mine: bool) -> DiscussionPostRow:
+    return DiscussionPostRow(
+        uuid=post.uuid,
+        reviewer=str(post.reviewer.name),
+        label=str(post.label),
+        body=str(post.body),
+        created_at=post.created_at,
+        edited_at=post.edited_at,
+        mine=mine,
     )
-    return NotePanel(
-        mine=str(mine.note),
+
+
+def discussion_for_component(
+    component: Component, user: AbstractBaseUser
+) -> DiscussionThread:
+    rating = Classification.objects.filter(
+        component=component, reviewer__user=user
+    ).first()
+    # The gate, and the whole of it: nothing below this line runs for a viewer
+    # who has not rated, so there is no post, no name and no count to leak.
+    if rating is None:
+        return DiscussionThread(rated=False, posts=[])
+    # Meta.ordering is oldest-first, so no order_by here. Two queries, both
+    # constant in the number of posts; the label is on the row rather than
+    # joined from Classification, so a reviewer changing their mind cannot
+    # rewrite the verdict beside everything they have already written.
+    posts = DiscussionPost.objects.filter(component=component).select_related(
+        "reviewer"
+    )
+    return DiscussionThread(
         rated=True,
-        others=[
-            ReviewerNote(
-                reviewer=str(row.reviewer.name),
-                label=str(row.label),
-                note=str(row.note),
-                updated_at=row.updated_at,
-            )
-            for row in qs
-        ],
+        posts=[_post_row(p, mine=p.reviewer_id == rating.reviewer_id) for p in posts],
     )
+
+
+def discussion_post_row(
+    post: DiscussionPost, user: AbstractBaseUser
+) -> DiscussionPostRow:
+    """One post in the same shape the thread renders, for a single-row swap.
+
+    The edit endpoint re-renders one row on its own, and a template resolves a
+    missing attribute to the empty string -- handed a bare model it would
+    quietly come back with an empty verdict chip and no edit controls.
+    """
+    return _post_row(post, mine=post.reviewer.user_id == user.pk)
+
+
+def component_indices(run: Run) -> list[int]:
+    """This run's component numbers, in order.
+
+    Materialised rather than assumed contiguous: both the rating page and
+    the discussion page derive their previous/next links from it.
+    """
+    return list(run.components.values_list("index", flat=True).order_by("index"))
 
 
 def user_labels_for_run(run: Run, user: AbstractBaseUser) -> dict[int, str]:

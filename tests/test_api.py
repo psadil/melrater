@@ -7,7 +7,7 @@ import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 from melrater.core import montage, selectors, services
-from melrater.core.models import Classification, Reviewer, Run
+from melrater.core.models import Classification, DiscussionPost, Reviewer, Run
 from melrater.core.schemas import RunPayload
 from tests.conftest import N_COMPONENTS
 
@@ -284,6 +284,39 @@ def test_a_run_payload_carries_no_human_note(ingested_run, user) -> None:
     component = ingested_run.components.get(index=1)
     services.rate_component(
         user=user, component=component, label="Signal", note="quokka-on-a-bicycle"
+    )
+
+    # Act
+    payload = selectors.run_payload(ingested_run)
+
+    # Assert
+    assert "quokka-on-a-bicycle" not in payload.model_dump_json()
+
+
+def test_push_leaves_a_discussion_post_untouched(
+    client, ingest_auth, ingested_run, push_bundle, user
+) -> None:
+    # Arrange: what reviewers say to each other travels no more than a label
+    component = ingested_run.components.get(index=1)
+    services.rate_component(user=user, component=component, label="Signal")
+    services.create_discussion_post(
+        user=user, component=component, body="quokka-on-a-bicycle"
+    )
+
+    # Act
+    _post(client, push_bundle, ingest_auth)
+
+    # Assert
+    assert DiscussionPost.objects.get().body == "quokka-on-a-bicycle"
+
+
+def test_a_run_payload_carries_no_discussion_post(ingested_run, user) -> None:
+    # Arrange: the payload is structurally incapable of holding one, so a
+    # leaked ingest credential cannot put words in a named reviewer's mouth
+    component = ingested_run.components.get(index=1)
+    services.rate_component(user=user, component=component, label="Signal")
+    services.create_discussion_post(
+        user=user, component=component, body="quokka-on-a-bicycle"
     )
 
     # Act

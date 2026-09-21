@@ -3,7 +3,7 @@ import re
 import pytest
 
 from melrater.core import selectors, services
-from melrater.core.models import Classification, Run
+from melrater.core.models import Classification, DiscussionPost, Run
 
 pytestmark = pytest.mark.django_db
 
@@ -178,29 +178,12 @@ def test_rate_post_without_a_note_keeps_the_existing_one(
     )
 
 
-def test_component_page_hides_other_notes_before_you_rate(
-    logged_in, ingested_run: Run, other_rater
-) -> None:
-    # Arrange: the independence property -- a gate in the template would still
-    # have shipped this text to the browser
-    services.rate_component(
-        user=other_rater,
-        component=_component(ingested_run),
-        label="Noise",
-        note=OTHER_NOTE,
-    )
-
-    # Act
-    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/")
-
-    # Assert
-    assert OTHER_NOTE not in response.content.decode()
-
-
-def test_component_page_shows_other_notes_once_you_have_rated(
+def test_component_page_never_shows_another_reviewers_note(
     logged_in, ingested_run: Run, user, other_rater
 ) -> None:
-    # Arrange
+    # Arrange: both have rated, which used to be what revealed a colleague's
+    # note. A note is private now, so there is no condition under which it
+    # appears -- and the gate is in the selector, so it never reaches the HTML.
     component = _component(ingested_run)
     services.rate_component(
         user=other_rater, component=component, label="Noise", note=OTHER_NOTE
@@ -211,13 +194,14 @@ def test_component_page_shows_other_notes_once_you_have_rated(
     response = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/")
 
     # Assert
-    assert OTHER_NOTE in response.content.decode()
+    assert OTHER_NOTE not in response.content.decode()
 
 
-def test_rate_post_reveals_other_notes(
+def test_rate_post_never_reveals_another_reviewers_note(
     logged_in, ingested_run: Run, other_rater
 ) -> None:
-    # Arrange: rating is what opens the card, in the same response
+    # Arrange: rate_response.html swaps the note card out of band, so this is
+    # the one response in which a rating and a note card are rendered together
     services.rate_component(
         user=other_rater,
         component=_component(ingested_run),
@@ -231,7 +215,7 @@ def test_rate_post_reveals_other_notes(
     )
 
     # Assert
-    assert OTHER_NOTE in response.content.decode()
+    assert OTHER_NOTE not in response.content.decode()
 
 
 def test_rate_post_refreshes_the_note_card_out_of_band(
@@ -874,3 +858,362 @@ def test_rating_response_carries_the_decision_guide(
 
     # Assert
     assert 'id="help-field-rating"' in response.content.decode()
+
+
+# --- discussion ---------------------------------------------------------
+
+#: A sentinel, for the reason OTHER_NOTE is one.
+OTHER_POST = "narwhal-in-a-hammock"
+
+
+def _discussion_card(body: str) -> str:
+    """Just the `#discussion` card, so the CSRF token does not confuse a diff."""
+    return body[body.index('id="discussion"') :]
+
+
+def _colleague_posts(run: Run, other_rater, index: int = 2) -> None:
+    component = _component(run, index)
+    services.rate_component(user=other_rater, component=component, label="Noise")
+    services.create_discussion_post(
+        user=other_rater, component=component, body=OTHER_POST
+    )
+
+
+def test_discussion_page_is_identical_whether_or_not_anybody_has_posted(
+    logged_in, ingested_run: Run, other_rater
+) -> None:
+    # Arrange: IC 2 has a thread, IC 3 has none, and this viewer has rated
+    # neither. This is the gate, and a substring assertion is not: a count in
+    # the unrated branch would keep every other test on this page green.
+    _colleague_posts(ingested_run, other_rater)
+
+    # Act
+    with_posts = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/discussion/")
+    without = logged_in.get(f"/runs/{ingested_run.pk}/ic/3/discussion/")
+
+    # Assert
+    assert _discussion_card(with_posts.content.decode()) == _discussion_card(
+        without.content.decode()
+    )
+
+
+def test_discussion_page_hides_a_post_before_you_rate(
+    logged_in, ingested_run: Run, other_rater
+) -> None:
+    # Arrange
+    _colleague_posts(ingested_run, other_rater)
+
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/discussion/")
+
+    # Assert
+    assert OTHER_POST not in response.content.decode()
+
+
+def test_discussion_page_hides_that_anyone_posted_before_you_rate(
+    logged_in, ingested_run: Run, other_rater
+) -> None:
+    # Arrange: half of what the delay protects is not learning that somebody
+    # else had something to say about this one
+    _colleague_posts(ingested_run, other_rater)
+
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/discussion/")
+
+    # Assert
+    assert "colleague" not in response.content.decode()
+
+
+def test_discussion_page_offers_no_composer_before_you_rate(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/discussion/")
+
+    # Assert
+    assert 'id="post-body"' not in response.content.decode()
+
+
+def test_discussion_page_answers_200_before_you_rate(
+    logged_in, ingested_run: Run
+) -> None:
+    # Assert: a refusal status would itself be a signal, and there is nothing
+    # to refuse -- the page is simply empty of everything but the explanation
+    assert logged_in.get(f"/runs/{ingested_run.pk}/ic/2/discussion/").status_code == 200
+
+
+def test_discussion_page_shows_a_post_once_you_have_rated(
+    logged_in, ingested_run: Run, user, other_rater
+) -> None:
+    # Arrange
+    _colleague_posts(ingested_run, other_rater)
+    services.rate_component(
+        user=user, component=_component(ingested_run), label="Signal"
+    )
+
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/discussion/")
+
+    # Assert
+    assert OTHER_POST in response.content.decode()
+
+
+def test_discussion_page_escapes_a_post_body(
+    logged_in, ingested_run: Run, user
+) -> None:
+    # Arrange: a post is the one place a reviewer's text is shown to somebody
+    # else, so autoescaping is the thing under test
+    component = _component(ingested_run)
+    services.rate_component(user=user, component=component, label="Signal")
+    services.create_discussion_post(
+        user=user, component=component, body="<script>alert(1)</script>"
+    )
+
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/discussion/")
+
+    # Assert
+    assert "&lt;script&gt;" in response.content.decode()
+
+
+def test_discussion_page_leaks_no_template_syntax(logged_in, ingested_run: Run) -> None:
+    # Assert: Django's {# ... #} is single-line only, so a multi-line note
+    # renders as visible page text instead of disappearing
+    body = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/discussion/").content.decode()
+
+    assert "{#" not in body and "{%" not in body
+
+
+def test_discussion_page_redirects_anonymous_to_login(
+    client, ingested_run: Run
+) -> None:
+    # Act
+    response = client.get(f"/runs/{ingested_run.pk}/ic/2/discussion/")
+
+    # Assert
+    assert response.status_code == 302 and "/accounts/login/" in response["Location"]
+
+
+def test_component_page_offers_the_discussion_tab(logged_in, ingested_run: Run) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/")
+
+    # Assert
+    assert f"/runs/{ingested_run.pk}/ic/2/discussion/" in response.content.decode()
+
+
+def test_the_tab_pair_is_identical_whether_or_not_anybody_has_posted(
+    logged_in, ingested_run: Run, other_rater
+) -> None:
+    # Arrange: the tab is on the rating page too, where it must not become a
+    # badge that reports on a component this viewer has not rated
+    _colleague_posts(ingested_run, other_rater)
+
+    # Act
+    with_posts = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/").content.decode()
+    without = logged_in.get(f"/runs/{ingested_run.pk}/ic/3/").content.decode()
+
+    # Assert: the same markup up to the component number each links to
+    assert _tabs(with_posts).replace("/ic/2/", "/ic/N/") == _tabs(without).replace(
+        "/ic/3/", "/ic/N/"
+    )
+
+
+def _tabs(body: str) -> str:
+    start = body.index('<span class="page-tabs">')
+    return body[start : body.index("</span>", body.index("</a>", start))]
+
+
+def test_discussion_post_stores_the_post(logged_in, ingested_run: Run, user) -> None:
+    # Arrange
+    services.rate_component(
+        user=user, component=_component(ingested_run), label="Signal"
+    )
+
+    # Act
+    logged_in.post(
+        f"/runs/{ingested_run.pk}/ic/2/discussion/post/", {"body": "edge ring"}
+    )
+
+    # Assert
+    assert DiscussionPost.objects.get(reviewer__user=user).body == "edge ring"
+
+
+def test_discussion_post_answers_with_the_refreshed_panel(
+    logged_in, ingested_run: Run, user
+) -> None:
+    # Arrange
+    services.rate_component(
+        user=user, component=_component(ingested_run), label="Signal"
+    )
+
+    # Act
+    response = logged_in.post(
+        f"/runs/{ingested_run.pk}/ic/2/discussion/post/", {"body": "edge ring"}
+    )
+
+    # Assert: one swap clears the composer and shows the new post
+    body = response.content.decode()
+    assert 'id="discussion"' in body and "edge ring" in body
+
+
+def test_discussion_post_before_rating_is_forbidden(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    response = logged_in.post(
+        f"/runs/{ingested_run.pk}/ic/2/discussion/post/", {"body": "edge ring"}
+    )
+
+    # Assert: unreachable through the UI, which is why it may name the refusal
+    assert response.status_code == 403
+
+
+def test_discussion_post_before_rating_stores_nothing(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    logged_in.post(
+        f"/runs/{ingested_run.pk}/ic/2/discussion/post/", {"body": "edge ring"}
+    )
+
+    # Assert
+    assert not DiscussionPost.objects.exists()
+
+
+def test_an_empty_post_comes_back_as_the_panel_with_an_error(
+    logged_in, ingested_run: Run, user
+) -> None:
+    # Arrange: `required` on the textarea is satisfied by one space, so this
+    # is reachable by typing -- and htmx does not swap a 4xx body, so a 400
+    # here would lose the refusal silently
+    services.rate_component(
+        user=user, component=_component(ingested_run), label="Signal"
+    )
+
+    # Act
+    response = logged_in.post(
+        f"/runs/{ingested_run.pk}/ic/2/discussion/post/", {"body": "   "}
+    )
+
+    # Assert
+    assert response.status_code == 200 and "post-error" in response.content.decode()
+
+
+def test_discussion_edit_updates_the_body(logged_in, ingested_run: Run, user) -> None:
+    # Arrange
+    component = _component(ingested_run)
+    services.rate_component(user=user, component=component, label="Signal")
+    post = services.create_discussion_post(user=user, component=component, body="first")
+
+    # Act
+    logged_in.post(
+        f"/runs/{ingested_run.pk}/ic/2/discussion/{post.uuid}/edit/",
+        {"body": "second"},
+    )
+
+    # Assert
+    assert DiscussionPost.objects.get(pk=post.pk).body == "second"
+
+
+def test_discussion_edit_answers_with_a_whole_row(
+    logged_in, ingested_run: Run, user
+) -> None:
+    # Arrange: rendered from a bare model the row would silently come back
+    # with an empty verdict chip and no edit controls
+    component = _component(ingested_run)
+    services.rate_component(user=user, component=component, label="Signal")
+    post = services.create_discussion_post(user=user, component=component, body="first")
+
+    # Act
+    response = logged_in.post(
+        f"/runs/{ingested_run.pk}/ic/2/discussion/{post.uuid}/edit/",
+        {"body": "second"},
+    )
+
+    # Assert
+    body = response.content.decode()
+    assert "verdict-signal" in body and "post-edit" in body
+
+
+def test_discussion_edit_refuses_another_reviewers_post(
+    logged_in, ingested_run: Run, user, other_rater
+) -> None:
+    # Arrange
+    component = _component(ingested_run)
+    services.rate_component(user=other_rater, component=component, label="Noise")
+    theirs = services.create_discussion_post(
+        user=other_rater, component=component, body=OTHER_POST
+    )
+    services.rate_component(user=user, component=component, label="Signal")
+
+    # Act
+    response = logged_in.post(
+        f"/runs/{ingested_run.pk}/ic/2/discussion/{theirs.uuid}/edit/",
+        {"body": "not any more"},
+    )
+
+    # Assert: 404, the same answer a uuid that does not exist gets, so naming
+    # a post cannot confirm that it is there
+    assert response.status_code == 404
+
+
+def test_discussion_delete_removes_your_own_post(
+    logged_in, ingested_run: Run, user
+) -> None:
+    # Arrange
+    component = _component(ingested_run)
+    services.rate_component(user=user, component=component, label="Signal")
+    post = services.create_discussion_post(user=user, component=component, body="oops")
+
+    # Act
+    logged_in.post(f"/runs/{ingested_run.pk}/ic/2/discussion/{post.uuid}/delete/")
+
+    # Assert
+    assert not DiscussionPost.objects.exists()
+
+
+def test_discussion_delete_answers_an_empty_200(
+    logged_in, ingested_run: Run, user
+) -> None:
+    # Arrange
+    component = _component(ingested_run)
+    services.rate_component(user=user, component=component, label="Signal")
+    post = services.create_discussion_post(user=user, component=component, body="oops")
+
+    # Act
+    response = logged_in.post(
+        f"/runs/{ingested_run.pk}/ic/2/discussion/{post.uuid}/delete/"
+    )
+
+    # Assert: not a 204 -- htmx does not swap one, so the row would stay put
+    assert (response.status_code, response.content) == (200, b"")
+
+
+def test_discussion_delete_refuses_another_reviewers_post(
+    logged_in, ingested_run: Run, user, other_rater
+) -> None:
+    # Arrange
+    component = _component(ingested_run)
+    services.rate_component(user=other_rater, component=component, label="Noise")
+    theirs = services.create_discussion_post(
+        user=other_rater, component=component, body=OTHER_POST
+    )
+    services.rate_component(user=user, component=component, label="Signal")
+
+    # Act
+    response = logged_in.post(
+        f"/runs/{ingested_run.pk}/ic/2/discussion/{theirs.uuid}/delete/"
+    )
+
+    # Assert
+    assert response.status_code == 404
+
+
+def test_discussion_page_is_not_cacheable(logged_in, ingested_run: Run) -> None:
+    # Assert: the deployment sits behind a shared proxy, and this page's whole
+    # body is gated per viewer. Django's Vary: Cookie is incidental -- it comes
+    # from touching the session -- so the intent is stated in code instead.
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/discussion/")
+
+    assert "no-store" in response["Cache-Control"]

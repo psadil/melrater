@@ -4,6 +4,7 @@ A web app for reviewing MELODIC ICA components, modeled on [fsleyes's melodic sc
 
 - **More context per component** — the framewise-displacement (motion) timecourse rendered time-aligned under the IC timecourse, and every pyFIX classifier metric shown against its distribution across the run's components (outliers surfaced first).
 - **Integrated multi-reviewer classification** — automated pyFIX verdicts are stored as reviewers (a model + threshold, e.g. `UKBiobank @ thr1`) alongside human reviewers.
+- **A place to argue about a component** — each one has a discussion thread, which opens to a reviewer once they have rated it, plus a private note that only its author ever sees.
 
 ## Setup
 
@@ -63,11 +64,20 @@ pixi run serve
 
 This collects static files and starts [granian](https://github.com/emmett-framework/granian) on <http://127.0.0.1:8000/>. The run list filters by subject, session, task or run, hides completed runs, and offers a resume link to the first component you have not rated.
 
-Keyboard shortcuts on a component page: `1`/`s`, `2`/`u`, `3`/`n` to rate, `←`/`→` to move between components, `g` to jump to one by number, `a` to toggle auto-advance, `o` to cycle the montage plane, `b` to swap the montage background, and `m` to swap between the unsmoothed and the smoothed map. The `?` beside the rating buttons is Griffanti et al.'s decision procedure — spatial map, then time series, then spectrum; keep what is not clearly noise — with the look-alikes to watch for.
+Keyboard shortcuts on a component page: `1`/`s`, `2`/`u`, `3`/`n` to rate, `←`/`→` to move between components, `g` to jump to one by number, `a` to toggle auto-advance, `o` to cycle the montage plane, `b` to swap the montage background, `m` to swap between the unsmoothed and the smoothed map, `d` to move between the rating and discussion tabs, and `c` to jump into whichever text box the tab has. The `?` beside the rating buttons is Griffanti et al.'s decision procedure — spatial map, then time series, then spectrum; keep what is not clearly noise — with the look-alikes to watch for.
 
 On `m`: the smoothed map is per-component rescaled, so read cluster count, size and placement rather than absolute colour. It is the view for a network's shape, a vein along the sinus, CSF in the ventricles or a white-matter pattern; the unsmoothed map is the view for stripes, checkerboards, the mixed signs of a susceptibility artefact and where a peak actually sits.
 
 On `b`: the structural is sharper and much easier to name a structure on, but FEAT registers it to the functional with a *linear* transform and nothing models EPI susceptibility distortion, so orbitofrontal, temporal-pole and sinus-adjacent voxels can be several millimetres out. It tells you what a component is sitting on; it is not evidence that the functional data are where it says they are. Judge a component that hugs the brain edge, a sinus or a ventricle on the functional background, which carries the true EPI geometry.
+
+### Notes and discussion
+
+Two places to write, with different audiences:
+
+- **Your note**, on the rating tab, is stored against your own rating and is **private to you** — no other reviewer sees it, now or later. (It was briefly shared with reviewers who had already rated; it is not any more. Say so to anyone who wrote one under the old rule.)
+- **The discussion tab** (`d`) is one thread per component, shared with the other human reviewers. It opens only once you have rated that component: until then nothing about it reaches you — not a post, not a name, not a count, not whether anybody has written at all. A judgement formed after reading somebody else's reasoning is no longer independent, which is what any later measure of agreement between reviewers rests on. Posts are flat and oldest-first, each carries its author's label as it stood when they wrote it, and you can edit or delete your own and nobody else's.
+
+Neither travels over the push API: `RunPayload` has no representation for a human reviewer at all, which is what makes a push structurally incapable of overwriting either. Both move between databases with `dumpdata --natural-primary` / `loaddata`.
 
 ## Push runs to the deployment
 

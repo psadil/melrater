@@ -129,6 +129,52 @@ img[data-bg-img="func"] { image-rendering: pixelated; }
 .montage-caption { color: var(--muted); font-size: 11px; margin-top: 6px; display: none; }
 .montage-caption.active { display: block; }
 
+/* --- rate/discussion tabs, in both toolbars --- */
+.page-tabs { display: flex; gap: 4px; align-items: center; }
+.page-tab {
+  border: 1px solid var(--border); border-radius: 6px; padding: 3px 12px;
+  color: var(--muted); font-size: 12px; text-decoration: none;
+}
+.page-tab.active { color: var(--text); background: var(--panel2); border-color: var(--accent); }
+.page-tab kbd { color: var(--muted); }
+
+/* --- discussion page ---------------------------------------------------
+   Not the rating grid: body is a column flexbox with overflow hidden and
+   .topbar is flex:none, so the page is the one growing child and does its own
+   scrolling. .toolbar reuses as-is (its grid-area is inert outside a grid) but
+   took its height from .rating-page's row template, so supply it. */
+.discussion-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.discussion-page .toolbar { flex: none; height: 48px; }
+/* flex: 1 as well as min-height: 0 — a scroll container's automatic minimum
+   size is already zero, but without flex-grow the card would float at the top
+   of an otherwise empty column whenever the thread is short. */
+.discussion-body {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: 20px; width: 100%; max-width: 900px; margin: 0 auto;
+}
+.post { padding: 8px 0; border-top: 1px solid var(--border); }
+.post:first-of-type { border-top: none; padding-top: 0; }
+/* pre-wrap because a post has newlines; anywhere because body is
+   overflow: hidden, so a pasted path that widened the page would be
+   unreachable rather than merely ugly. */
+.post-body {
+  color: var(--text); font-size: 12px; margin-top: 2px;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.post-edit { margin-top: 6px; }
+.post-edit summary { color: var(--muted); font-size: 11px; cursor: pointer; }
+.post-actions { display: flex; gap: 8px; margin-top: 6px; }
+.post-delete { color: var(--noise); border-color: var(--noise); }
+.post-compose { margin-top: 12px; }
+.post-error { color: var(--noise); font-size: 12px; margin-top: 8px; }
+
+/* .help-pop is pinned to the rating grid's 400px .side and 64px .ratebar,
+   neither of which exists here. A popover panel is still a DOM child of its
+   anchor even in the top layer, so a descendant selector reaches it. */
+.discussion-page .help-pop {
+  right: auto; left: 50%; transform: translateX(-50%); bottom: 24px;
+}
+
 /* verdict card */
 .verdict-row { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; }
 .verdict { font-weight: 700; font-size: 15px; }
@@ -154,6 +200,8 @@ img[data-bg-img="func"] { image-rendering: pixelated; }
 }
 .note-saved { color: var(--signal); }
 .note-pending { color: var(--unknown); }
+.note-hint { font-size: 11px; margin-top: 6px; }
+.note-hint a { color: var(--accent); }
 .note-row { margin-top: 10px; }
 .note-meta { display: flex; gap: 6px; align-items: center; margin-bottom: 2px; }
 /* .verdict is 15px/700 for the FIX card's headline; beside a note it is a tag */

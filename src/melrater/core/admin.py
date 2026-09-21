@@ -1,6 +1,12 @@
 from django.contrib import admin
 
-from melrater.core.models import Classification, Component, Reviewer, Run
+from melrater.core.models import (
+    Classification,
+    Component,
+    DiscussionPost,
+    Reviewer,
+    Run,
+)
 
 
 @admin.register(Run)
@@ -24,3 +30,13 @@ class ReviewerAdmin(admin.ModelAdmin):
 class ClassificationAdmin(admin.ModelAdmin):
     list_display = ("component", "reviewer", "label", "probability", "updated_at")
     list_filter = ("label", "reviewer")
+
+
+@admin.register(DiscussionPost)
+class DiscussionPostAdmin(admin.ModelAdmin):
+    list_display = ("component", "reviewer", "label", "created_at", "edited_at")
+    list_filter = ("reviewer",)
+    # Load-bearing: Component.__str__ is f"{self.run} IC {self.index}", so the
+    # changelist is an N+1 across two tables without it.
+    list_select_related = ("reviewer", "component", "component__run")
+    readonly_fields = ("uuid", "created_at")

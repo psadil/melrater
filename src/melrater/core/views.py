@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from urllib.parse import urlencode
+from uuid import UUID
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
@@ -11,15 +12,17 @@ from django.http import (
     HttpResponse,
     HttpResponseBadRequest,
     HttpResponseBase,
+    HttpResponseForbidden,
 )
 from django.shortcuts import get_object_or_404, render
+from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods
 from django.views.static import serve
 
 from melrater.core import charts, selectors, services
 from melrater.core import help as help_catalog
 from melrater.core.metrics import OUTLIER_Z, family_of
-from melrater.core.models import Component, Run
+from melrater.core.models import Component, DiscussionPost, Run
 from melrater.core.montage import AXES, BACKGROUNDS, SMOOTHINGS
 from melrater.core.schemas import ComponentData, RunData
 
@@ -165,7 +168,7 @@ def _component_context(run: Run, component: Component, user: AbstractBaseUser) -
     run_data = selectors.run_data(run)
     comp = selectors.component_data(component)
     index = comp.index
-    indices = list(run.components.values_list("index", flat=True).order_by("index"))
+    indices = selectors.component_indices(run)
     n_total = len(indices)
     user_labels = selectors.user_labels_for_run(run, user)
     notes = selectors.notes_for_component(component, user)
@@ -370,3 +373,153 @@ def component_note(request: HttpRequest, run_id: int, index: int) -> HttpRespons
         "core/partials/note_status.html",
         {"note_state": "saved" if stored is not None else "pending"},
     )
+
+
+def _discussion_context(run: Run, component: Component, user: AbstractBaseUser) -> dict:
+    """Everything the discussion page needs, and nothing the rating page does.
+
+    Deliberately not `_component_context`: that one reads six JSONFields,
+    renders three SVG charts and the whole metric panel, and builds up to
+    twelve montage URLs, none of which this page shows.
+    """
+    indices = selectors.component_indices(run)
+    index = component.index
+    at = indices.index(index)
+    return {
+        "run": run,
+        "component": component,
+        "n_total": len(indices),
+        "prev_index": indices[at - 1] if at > 0 else None,
+        "next_index": indices[at + 1] if at + 1 < len(indices) else None,
+        "thread": selectors.discussion_for_component(component, user),
+        "user_label": selectors.user_label_for_component(component, user),
+        "post_max_length": services.POST_MAX_LENGTH,
+    }
+
+
+def _component_of(run_id: int, index: int) -> tuple[Run, Component]:
+    run = get_object_or_404(Run, pk=run_id)
+    return run, get_object_or_404(Component, run=run, index=index)
+
+
+def _your_post(
+    component: Component, post_uuid: UUID, user: AbstractBaseUser
+) -> DiscussionPost:
+    """One of the viewer's own posts on this component, or a 404.
+
+    Scoped by author on purpose. "No such post", "somebody else's post" and
+    "you have not rated this component" then answer identically, so a uuid --
+    which is not a secret: it is the natural key, and it travels in every
+    fixture and every pasted URL — cannot be used to confirm that a post
+    exists on a component the viewer has no access to.
+    """
+    return get_object_or_404(
+        DiscussionPost.objects.select_related("reviewer"),
+        uuid=post_uuid,
+        component=component,
+        reviewer__user=user,
+    )
+
+
+@login_required
+# The one page whose entire body is gated per viewer. Django's Vary: Cookie is
+# incidental (it comes from touching the session), and the deployment sits
+# behind a shared proxy; say what is meant instead of relying on that.
+@never_cache
+def component_discussion(request: HttpRequest, run_id: int, index: int) -> HttpResponse:
+    run, component = _component_of(run_id, index)
+    context = _discussion_context(run, component, _authed_user(request))
+    return render(request, "core/discussion.html", context)
+
+
+@login_required
+@require_http_methods(["POST"])
+def discussion_post(request: HttpRequest, run_id: int, index: int) -> HttpResponse:
+    """Add one message to the thread, answering with the whole panel.
+
+    One `#discussion` swap rather than an out-of-band pair: it clears the
+    composer and refreshes the thread in the same response, which is also what
+    makes the "nothing here yet" line disappear.
+    """
+    user = _authed_user(request)
+    run, component = _component_of(run_id, index)
+    error = ""
+    try:
+        services.create_discussion_post(
+            user=user, component=component, body=request.POST.get("body", "")
+        )
+    except services.EmptyPost:
+        # A 200, not a 400: `required` on the textarea is satisfied by a single
+        # space, so this is reachable by typing, and htmx does not swap a 4xx
+        # body — a refusal would show the reviewer nothing at all. The same
+        # reasoning `component_note` records for its own refusal.
+        error = "a post needs some words in it"
+    except services.NotRated:
+        return HttpResponseForbidden(
+            "rate this component before joining its discussion",
+            content_type="text/plain",
+        )
+    except ValueError as exc:
+        # Over-length only, and unreachable through the UI: the textarea
+        # carries maxlength. A forged post gets told why.
+        return HttpResponseBadRequest(str(exc), content_type="text/plain")
+    context = _discussion_context(run, component, user)
+    # No draft to hand back: the only error this re-renders is an empty post,
+    # so whatever was typed was whitespace, and putting it back would cost the
+    # composer its placeholder for nothing.
+    context["post_error"] = error
+    return render(request, "core/partials/discussion.html", context)
+
+
+@login_required
+@require_http_methods(["POST"])
+def discussion_post_edit(
+    request: HttpRequest, run_id: int, index: int, post_uuid: UUID
+) -> HttpResponse:
+    """Rewrite one of your own posts, answering with that row alone."""
+    user = _authed_user(request)
+    run, component = _component_of(run_id, index)
+    post = _your_post(component, post_uuid, user)
+    try:
+        services.edit_discussion_post(
+            user=user, post=post, body=request.POST.get("body", "")
+        )
+    except services.EmptyPost:
+        return HttpResponseBadRequest(
+            "a post needs some words in it", content_type="text/plain"
+        )
+    except services.NotYours:
+        return HttpResponseForbidden("not your post", content_type="text/plain")
+    except ValueError as exc:
+        return HttpResponseBadRequest(str(exc), content_type="text/plain")
+    return render(
+        request,
+        "core/partials/post_row.html",
+        {
+            "p": selectors.discussion_post_row(post, user),
+            "run": run,
+            "component": component,
+            "post_max_length": services.POST_MAX_LENGTH,
+        },
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def discussion_post_delete(
+    request: HttpRequest, run_id: int, index: int, post_uuid: UUID
+) -> HttpResponse:
+    """Withdraw one of your own posts.
+
+    An empty 200, not a 204: htmx's response handling swaps `[23]..` and
+    explicitly does not swap a 204, so a 204 would leave the deleted row on
+    screen until the page was reloaded.
+    """
+    user = _authed_user(request)
+    _, component = _component_of(run_id, index)
+    post = _your_post(component, post_uuid, user)
+    try:
+        services.delete_discussion_post(user=user, post=post)
+    except services.NotYours:
+        return HttpResponseForbidden("not your post", content_type="text/plain")
+    return HttpResponse(status=200)

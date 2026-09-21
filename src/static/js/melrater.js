@@ -123,8 +123,9 @@
 
   document.addEventListener("keydown", (e) => {
     // Before the isTyping bail, or it could never fire: escape is the way back
-    // out of the note box, and blurring it is what triggers htmx's save.
-    if (e.key === "Escape" && e.target.id === "note-text") {
+    // out of a text box. For the note box blurring it is also what triggers
+    // htmx's save; for the discussion composer it is just the way out.
+    if (e.key === "Escape" && e.target.tagName === "TEXTAREA") {
       e.target.blur();
       return;
     }
@@ -156,11 +157,18 @@
         e.preventDefault();
       }
     } else if (e.key === "c") {
-      const note = document.getElementById("note-text");
-      if (note) {
-        note.focus();
+      // Whichever box this page has: the private note on the rating tab, the
+      // composer on the discussion tab.
+      const box = document.getElementById("note-text") ||
+        document.getElementById("post-body");
+      if (box) {
+        box.focus();
         e.preventDefault();  // or the c lands in the box
       }
+    } else if (e.key === "d") {
+      // The other tab, whichever one this is. go() no-ops on a missing
+      // element, so d is inert on the run list.
+      go("nav-tab-other");
     }
   });
 

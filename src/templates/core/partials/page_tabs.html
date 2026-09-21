@@ -1,0 +1,15 @@
+{% comment %}
+  The rate/discussion pair, included from both toolbars with an explicit
+  `tab=` so neither site relies on a default. Byte-identical for every viewer:
+  no count, no badge, nothing that would tell a reviewer who has not rated
+  this component that there is anything behind the other tab.
+{% endcomment %}
+<span class="page-tabs">
+  {% if tab == "rate" %}
+    <span class="page-tab active">rate</span>
+    <a class="page-tab" id="nav-tab-other" href="{% url 'component-discussion' run.pk component.index %}">discussion <kbd>d</kbd></a>
+  {% else %}
+    <a class="page-tab" id="nav-tab-other" href="{% url 'component-detail' run.pk component.index %}">rate <kbd>d</kbd></a>
+    <span class="page-tab active">discussion</span>
+  {% endif %}
+</span>

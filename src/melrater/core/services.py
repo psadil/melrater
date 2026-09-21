@@ -15,10 +15,17 @@ from uuid import UUID, uuid4
 from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import transaction
+from django.utils import timezone
 
 from melrater.core import lake, melodic, metrics, montage, transfer
 from melrater.core import storage as montage_store
-from melrater.core.models import Classification, Component, Reviewer, Run
+from melrater.core.models import (
+    Classification,
+    Component,
+    DiscussionPost,
+    Reviewer,
+    Run,
+)
 from melrater.core.schemas import FixReviewerPayload, RunPayload
 
 logger = logging.getLogger("melrater.ingest")
@@ -34,6 +41,18 @@ class PushRejected(Exception):
 
 class PushTooLarge(Exception):
     """A pushed run is over one of the server's ingest ceilings."""
+
+
+class NotRated(Exception):
+    """A reviewer reached a discussion they have not yet earned access to."""
+
+
+class EmptyPost(Exception):
+    """A post with nothing in it once the whitespace is stripped."""
+
+
+class NotYours(Exception):
+    """A reviewer tried to change somebody else's post."""
 
 
 def reviewer_for_user(user: AbstractBaseUser) -> Reviewer:
@@ -52,13 +71,20 @@ def reviewer_for_user(user: AbstractBaseUser) -> Reviewer:
 NOTE_MAX_LENGTH = 2000
 
 
-def _clean_note(note: str) -> str:
-    """Normalise and bound one note, raising ValueError as `label` does."""
-    cleaned = note.strip()
-    if len(cleaned) > NOTE_MAX_LENGTH:
-        raise ValueError(
-            f"note is {len(cleaned)} characters; the limit is {NOTE_MAX_LENGTH}"
-        )
+#: Longest discussion post. Larger than a note because the jobs differ: a note
+#: is a jotting for its author, a post makes a case to somebody else.
+POST_MAX_LENGTH = 4000
+
+
+def _clean_text(text: str, *, limit: int, what: str) -> str:
+    """Normalise and bound one piece of free text, as `label` is bounded.
+
+    Deliberately does not reject empty: `note=""` is a real value that clears
+    a note. A post that may not be empty says so itself.
+    """
+    cleaned = text.strip()
+    if len(cleaned) > limit:
+        raise ValueError(f"{what} is {len(cleaned)} characters; the limit is {limit}")
     return cleaned
 
 
@@ -79,7 +105,7 @@ def rate_component(
         raise ValueError(f"invalid label: {label!r}")
     defaults: dict[str, str] = {"label": label}
     if note is not None:
-        defaults["note"] = _clean_note(note)
+        defaults["note"] = _clean_text(note, limit=NOTE_MAX_LENGTH, what="note")
     reviewer = reviewer_for_user(user)
     classification, _ = Classification.objects.update_or_create(
         component=component, reviewer=reviewer, defaults=defaults
@@ -99,7 +125,7 @@ def set_component_note(
     """
     # Before the existence check, so an over-length note is refused whether or
     # not this reviewer has rated.
-    cleaned = _clean_note(note)
+    cleaned = _clean_text(note, limit=NOTE_MAX_LENGTH, what="note")
     reviewer = reviewer_for_user(user)
     classification = Classification.objects.filter(
         component=component, reviewer=reviewer
@@ -111,6 +137,77 @@ def set_component_note(
     # update_fields -- omitting it would leave the column lying about the row.
     classification.save(update_fields=("note", "updated_at"))
     return classification
+
+
+# --- discussion --------------------------------------------------------------
+
+
+def _clean_body(body: str) -> str:
+    cleaned = _clean_text(body, limit=POST_MAX_LENGTH, what="post")
+    if not cleaned:
+        raise EmptyPost
+    return cleaned
+
+
+def _require_author(user: AbstractBaseUser, post: DiscussionPost) -> None:
+    """Refuse to touch a post somebody else wrote.
+
+    Compares `post.reviewer.user_id` rather than calling `reviewer_for_user`:
+    that is a get_or_create, and an ownership check must not be able to create
+    a row as a side effect. A FIX reviewer's user_id is None and so never
+    matches a real primary key.
+    """
+    if post.reviewer.user_id != user.pk:
+        raise NotYours
+
+
+def create_discussion_post(
+    *, user: AbstractBaseUser, component: Component, body: str
+) -> DiscussionPost:
+    """Add one message to a component's thread; refuse before a rating.
+
+    The bound is checked before the gate, as `set_component_note` checks its
+    own, so an over-long body is refused whether or not this reviewer has
+    rated. The gate itself is a pure read -- `reviewer_for_user` would mint a
+    Reviewer row for an account about to be refused, and Reviewer.user is
+    PROTECT, so that row could never be deleted again.
+    """
+    cleaned = _clean_body(body)
+    rating = Classification.objects.filter(
+        component=component, reviewer__user=user
+    ).first()
+    if rating is None:
+        raise NotRated
+    return DiscussionPost.objects.create(
+        component=component,
+        reviewer_id=rating.reviewer_id,
+        # Copied now, not joined later: see the field's comment.
+        label=rating.label,
+        body=cleaned,
+    )
+
+
+def edit_discussion_post(
+    *, user: AbstractBaseUser, post: DiscussionPost, body: str
+) -> DiscussionPost:
+    cleaned = _clean_body(body)
+    _require_author(user, post)
+    post.body = cleaned
+    post.edited_at = timezone.now()
+    post.save(update_fields=("body", "edited_at"))
+    return post
+
+
+def delete_discussion_post(*, user: AbstractBaseUser, post: DiscussionPost) -> None:
+    """Remove one of your own posts, for good.
+
+    No tombstone: the thread is flat, so nothing is orphaned, and the study's
+    actual output -- a Classification -- is not preserved any harder than this
+    (it cascades from its Reviewer). A withdrawn message is correspondence,
+    not a measurement.
+    """
+    _require_author(user, post)
+    post.delete()
 
 
 def _fix_reviewer(result: melodic.FixResult) -> Reviewer:

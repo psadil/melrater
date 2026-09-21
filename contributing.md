@@ -108,10 +108,12 @@ task's own env, where it wins.
   `ingest` group. Montages are stored before the rows that name them, so a
   push that dies leaves invisible orphans (`prune_orphan_montages`) rather
   than a run with broken images; a run the server already holds is only ever
-  re-rendered, never rewritten. Human reviewers and classifications have no
-  representation in `RunPayload` at all, which is what makes a push unable to
-  overwrite ratings. Models still carry `natural_key()` and
-  `get_by_natural_key()` so `dumpdata`/`loaddata` remain available; add them
+  re-rendered, never rewritten. Human reviewers, their classifications and
+  their discussion posts have no representation in `RunPayload` at all, which
+  is what makes a push unable to overwrite reviewer work — and, for a post,
+  unable to put words in a named reviewer's mouth. Models still carry
+  `natural_key()` and `get_by_natural_key()` so `dumpdata`/`loaddata` remain
+  available; add them
   to any new model that has to travel.
 - **Serving**: `pixi run serve` runs granian (async, uvloop, ASGI without
   lifespan) and mounts the collected static files itself; montages under
@@ -145,5 +147,20 @@ task's own env, where it wins.
   so `.help-pop` has to reset the inherited text properties, and a `<button>`
   is an atomic inline, so a `?` at the end of a caption needs `.nobr` or it
   wraps onto a line of its own.
+- **Two places a reviewer writes, with different audiences.**
+  `Classification.note` is a jotting, private to its author; `DiscussionPost`
+  is the thread they share. Both open only in terms of
+  what the *selector* returns — `notes_for_component` and
+  `discussion_for_component` — never a template `{% if %}`, because a gate in
+  the template would still have shipped the text to the browser. The
+  discussion's rule is absolute: before a reviewer has rated a component,
+  nothing about its thread may reach them, not a post, not a name, not a
+  count, not that anybody wrote at all, because a judgement formed after
+  reading somebody else's reasoning is not an independent one. That is why
+  there is no post count on the run list and no badge on the tab, and why
+  `tests/test_views.py` pins the gate by comparing the whole rendered card
+  between a component with a thread and one without rather than by grepping
+  for a sentinel. A post's `label` is copied at write time rather than joined,
+  so re-rating never retitles what somebody already said.
 - **Django template comments are single-line.** `{# ... #}` spanning two lines
   renders as visible page text; use `{% comment %}` for anything longer.

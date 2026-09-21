@@ -1,0 +1,35 @@
+{% load help_tags %}
+<div class="card" id="discussion">
+  <div class="card-title"><span class="card-title-text">discussion
+    {% help_bubble "field.discussion" %}</span></div>
+  {% if not thread.rated %}
+    {% comment %}
+      The whole gated branch. Not a count, not a name, not "3 posts" -- the
+      selector returned nothing, so there is nothing here to render, and this
+      page is byte-identical whether or not the thread has anything in it.
+    {% endcomment %}
+    <div class="muted">Rate this component and the discussion opens. Until
+      then nothing about it is shown, so the call you make is your own.</div>
+  {% else %}
+    {% for p in thread.posts %}
+      {% include "core/partials/post_row.html" %}
+    {% empty %}
+      <div class="muted">Nothing here yet — say the first thing.</div>
+    {% endfor %}
+    {% if post_error %}<div class="post-error">{{ post_error }}</div>{% endif %}
+    {% comment %}
+      No whitespace between the tag and the value, for the reason the note box
+      records: everything between <textarea> and </textarea> is the value.
+    {% endcomment %}
+    <textarea class="note-text post-compose" id="post-body" name="body" rows="3"
+              required maxlength="{{ post_max_length }}"
+              placeholder="what do you make of this one?"></textarea>
+    <div class="post-actions">
+      <button class="nav-btn" type="button"
+              hx-post="{% url 'discussion-post' run.pk component.index %}"
+              hx-include="#post-body"
+              hx-target="#discussion" hx-swap="outerHTML"
+              hx-disabled-elt="this">post</button>
+    </div>
+  {% endif %}
+</div>

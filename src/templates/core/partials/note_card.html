@@ -1,6 +1,6 @@
 {% load help_tags %}
 <div class="card" id="note-card"{% if oob %} hx-swap-oob="true"{% endif %}>
-  <div class="card-title"><span class="card-title-text">notes
+  <div class="card-title"><span class="card-title-text">your note
     {% help_bubble "field.note" %}</span>
     {% include "core/partials/note_status.html" %}
   </div>
@@ -16,20 +16,6 @@
             hx-post="{% url 'component-note' run.pk component.index %}"
             hx-trigger="change"
             hx-target="#note-status" hx-swap="outerHTML">{{ notes.mine }}</textarea>
-  {% for n in notes.others %}
-    <div class="note-row">
-      <div class="note-meta">
-        <span class="meta-chip">{{ n.reviewer }}</span>
-        <span class="verdict verdict-{{ n.label|lower }}">{{ n.label|upper }}</span>
-        <span class="note-when">{{ n.updated_at|timesince }} ago</span>
-      </div>
-      <p class="note-body">{{ n.note }}</p>
-    </div>
-  {% empty %}
-    {% comment %}
-      Guarded on `rated`: an unrated reviewer must not learn even that somebody
-      else wrote something, which is half of what the delay protects.
-    {% endcomment %}
-    {% if notes.rated %}<div class="muted">no other reviewer has left a note</div>{% endif %}
-  {% endfor %}
+  <div class="muted note-hint">Private to you. To say something the others will
+    read, use the <a href="{% url 'component-discussion' run.pk component.index %}">discussion</a> tab.</div>
 </div>

@@ -1,0 +1,35 @@
+<article class="post" id="post-{{ p.uuid }}">
+  <div class="note-meta">
+    <span class="meta-chip">{{ p.reviewer }}</span>
+    {% comment %}
+      The label as it stood when the post was written, not as it stands now:
+      it is a column on the row, so re-rating cannot retitle what somebody
+      already said.
+    {% endcomment %}
+    <span class="verdict verdict-{{ p.label|lower }}">{{ p.label|upper }}</span>
+    <span class="note-when">{{ p.created_at|timesince }} ago{% if p.edited_at %} · edited{% endif %}</span>
+  </div>
+  <p class="post-body">{{ p.body }}</p>
+  {% if p.mine %}
+    {% comment %}
+      A <details> rather than a JS toggle or a GET endpoint for an edit form:
+      the metrics card already discloses this way, and the frontend budget is
+      keyboard shortcuts and toggling pre-rendered content.
+    {% endcomment %}
+    <details class="post-edit">
+      <summary>edit</summary>
+      <textarea class="note-text" name="body" rows="3"
+                maxlength="{{ post_max_length }}">{{ p.body }}</textarea>
+      <div class="post-actions">
+        <button class="nav-btn" type="button"
+                hx-post="{% url 'discussion-post-edit' run.pk component.index p.uuid %}"
+                hx-include="closest details"
+                hx-target="#post-{{ p.uuid }}" hx-swap="outerHTML">save</button>
+        <button class="nav-btn post-delete" type="button"
+                hx-post="{% url 'discussion-post-delete' run.pk component.index p.uuid %}"
+                hx-confirm="delete this post?"
+                hx-target="#post-{{ p.uuid }}" hx-swap="outerHTML">delete</button>
+      </div>
+    </details>
+  {% endif %}
+</article>

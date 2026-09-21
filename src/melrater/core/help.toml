@@ -182,18 +182,34 @@ bullets = [
 refs = ["griffanti2017"]
 
 [field.note]
-title = "notes"
+title = "your note"
 body = """
-A free-text note on this component, stored against your own rating. Other \
-human reviewers' notes stay hidden until you have rated the component \
-yourself: a note usually gives away the label it explains, and a judgement \
-formed after reading somebody else's reasoning is no longer independent, \
-which is what any later measure of agreement between reviewers rests on."""
+A free-text note on this component, stored against your own rating and \
+private to you: no other reviewer sees it, now or later. It is for the \
+reasoning you want beside your own label when you come back to it. \
+Reasoning you want somebody else to read goes on the discussion tab, where \
+it can be answered."""
 bullets = [
   "the note is saved when you click away from the box, and again with the label when you rate — so typing a note and then rating stores both, even with auto-advance on",
   "there is nowhere to keep a note before you rate, because it lives on the rating; until then the box says so",
-  "worth writing: what made the call hard, a look-alike you ruled out, or another component in the run that belongs with this one",
   "press c to jump to the box, escape to leave it",
+]
+
+[field.discussion]
+title = "discussion"
+body = """
+One thread per component, shared with the other human reviewers. It opens \
+only once you have rated this component: until then nothing about it \
+reaches you — not a post, not a name, not a count, not whether anybody has \
+written at all. A judgement formed after reading somebody else's reasoning \
+is no longer independent, which is what any later measure of agreement \
+between reviewers rests on."""
+bullets = [
+  "flat and oldest-first; each post carries its author's label as it stood when they wrote it, so re-rating never retitles what somebody already said",
+  "you can edit or delete your own posts and nobody else's",
+  "worth saying: what made the call hard, a look-alike you ruled out, or another component in the run that belongs with this one",
+  "for something only you will read, use the note box on the rating tab",
+  "press d to move between the two tabs, c to jump to the box, escape to leave it",
 ]
 
 [field.fix_verdict]

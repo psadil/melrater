@@ -6,7 +6,13 @@ from django.core.management.base import CommandError
 from django.db.models import ProtectedError
 
 from melrater.core import melodic, montage, resample, selectors, services
-from melrater.core.models import Classification, Component, Reviewer, Run
+from melrater.core.models import (
+    Classification,
+    Component,
+    DiscussionPost,
+    Reviewer,
+    Run,
+)
 from tests.conftest import (
     N_COMPONENTS,
     N_TIMEPOINTS,
@@ -486,3 +492,164 @@ def test_ingest_fails_on_a_registration_that_is_present_but_broken(
     # Act / Assert
     with pytest.raises(resample.RegistrationError):
         services.ingest_run(source=melodic.load_run(anat_run_inputs(anat_melodic_dir)))
+
+
+# --- discussion --------------------------------------------------------------
+
+
+@pytest.fixture
+def rated(bare_runs, user) -> Component:
+    """One component this user has already rated, so the thread is open."""
+    component = Component.objects.get(run=bare_runs(1)[0], index=1)
+    services.rate_component(user=user, component=component, label="Noise")
+    return component
+
+
+def test_create_discussion_post_stores_the_body(rated, user) -> None:
+    # Act
+    post = services.create_discussion_post(
+        user=user, component=rated, body="the ring follows the sinus"
+    )
+
+    # Assert
+    assert post.body == "the ring follows the sinus"
+
+
+def test_create_discussion_post_strips_the_body(rated, user) -> None:
+    # Act
+    post = services.create_discussion_post(user=user, component=rated, body="  edge  ")
+
+    # Assert
+    assert post.body == "edge"
+
+
+def test_create_discussion_post_copies_the_authors_current_label(rated, user) -> None:
+    # Act
+    post = services.create_discussion_post(user=user, component=rated, body="noisy")
+
+    # Assert
+    assert post.label == "Noise"
+
+
+def test_create_discussion_post_refuses_before_you_rate(bare_runs, user) -> None:
+    # Arrange
+    component = Component.objects.get(run=bare_runs(1)[0], index=1)
+
+    # Act / Assert
+    with pytest.raises(services.NotRated):
+        services.create_discussion_post(user=user, component=component, body="hello")
+
+
+def test_a_refused_post_stores_nothing(bare_runs, user) -> None:
+    # Arrange
+    component = Component.objects.get(run=bare_runs(1)[0], index=1)
+    with pytest.raises(services.NotRated):
+        services.create_discussion_post(user=user, component=component, body="hello")
+
+    # Assert
+    assert not DiscussionPost.objects.exists()
+
+
+def test_a_refused_post_mints_no_reviewer(bare_runs, user) -> None:
+    # Arrange: reviewer_for_user is a get_or_create and Reviewer.user is
+    # PROTECT, so a row made on this path could never be deleted again
+    component = Component.objects.get(run=bare_runs(1)[0], index=1)
+    with pytest.raises(services.NotRated):
+        services.create_discussion_post(user=user, component=component, body="hello")
+
+    # Assert
+    assert not Reviewer.objects.filter(user=user).exists()
+
+
+def test_create_discussion_post_rejects_an_empty_body(rated, user) -> None:
+    # Act / Assert: whitespace is not a post
+    with pytest.raises(services.EmptyPost):
+        services.create_discussion_post(user=user, component=rated, body="   ")
+
+
+def test_create_discussion_post_rejects_an_overlong_body(rated, user) -> None:
+    # Act / Assert
+    with pytest.raises(ValueError, match="the limit is"):
+        services.create_discussion_post(
+            user=user, component=rated, body="x" * (services.POST_MAX_LENGTH + 1)
+        )
+
+
+def test_a_new_post_is_not_marked_edited(rated, user) -> None:
+    # Act
+    post = services.create_discussion_post(user=user, component=rated, body="first")
+
+    # Assert
+    assert post.edited_at is None
+
+
+def test_edit_discussion_post_replaces_the_body(rated, user) -> None:
+    # Arrange
+    post = services.create_discussion_post(user=user, component=rated, body="first")
+
+    # Act
+    services.edit_discussion_post(user=user, post=post, body="second")
+
+    # Assert
+    assert DiscussionPost.objects.get(pk=post.pk).body == "second"
+
+
+def test_edit_discussion_post_records_when(rated, user) -> None:
+    # Arrange
+    post = services.create_discussion_post(user=user, component=rated, body="first")
+
+    # Act
+    services.edit_discussion_post(user=user, post=post, body="second")
+
+    # Assert
+    assert DiscussionPost.objects.get(pk=post.pk).edited_at is not None
+
+
+def test_edit_discussion_post_refuses_another_reviewers_post(
+    rated, user, other_rater
+) -> None:
+    # Arrange
+    services.rate_component(user=other_rater, component=rated, label="Signal")
+    theirs = services.create_discussion_post(
+        user=other_rater, component=rated, body="theirs"
+    )
+
+    # Act / Assert
+    with pytest.raises(services.NotYours):
+        services.edit_discussion_post(user=user, post=theirs, body="not any more")
+
+
+def test_delete_discussion_post_removes_the_row(rated, user) -> None:
+    # Arrange
+    post = services.create_discussion_post(user=user, component=rated, body="oops")
+
+    # Act
+    services.delete_discussion_post(user=user, post=post)
+
+    # Assert
+    assert not DiscussionPost.objects.filter(pk=post.pk).exists()
+
+
+def test_delete_discussion_post_refuses_another_reviewers_post(
+    rated, user, other_rater
+) -> None:
+    # Arrange
+    services.rate_component(user=other_rater, component=rated, label="Signal")
+    theirs = services.create_discussion_post(
+        user=other_rater, component=rated, body="theirs"
+    )
+
+    # Act / Assert
+    with pytest.raises(services.NotYours):
+        services.delete_discussion_post(user=user, post=theirs)
+
+
+def test_deleting_a_run_takes_its_discussion_with_it(rated, user) -> None:
+    # Arrange
+    services.create_discussion_post(user=user, component=rated, body="about this run")
+
+    # Act
+    services.delete_run(run=rated.run)
+
+    # Assert
+    assert not DiscussionPost.objects.exists()
