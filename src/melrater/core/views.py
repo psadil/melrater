@@ -19,12 +19,12 @@ from django.views.decorators.cache import cache_control
 from django.views.decorators.http import require_http_methods
 from django.views.static import serve
 
-from melrater.core import charts, selectors, services
+from melrater.core import charts, metrics, selectors, services
 from melrater.core import help as help_catalog
-from melrater.core.metrics import OUTLIER_Z, family_of
+from melrater.core.metrics import OUTLIER_Z, MetricFrame, family_of
 from melrater.core.models import Component, DiscussionPost, Run
 from melrater.core.montage import AXES, BACKGROUNDS, SMOOTHINGS
-from melrater.core.schemas import ComponentData, RunData
+from melrater.core.schemas import CohortData, ComponentData, RunData
 
 RATING_BUTTONS = [
     {"label": "Signal", "keys": ["1", "s"]},
@@ -131,22 +131,50 @@ class MetricFamily:
     help_key: str
 
 
-def _metric_panel(run_data: RunData, comp: ComponentData) -> dict:
+def _metric_title(name: str, frame: MetricFrame) -> str:
+    """The row's `title=` text: the catalog's definition, then the scan's own z.
+
+    The score beside the strip is the cohort's whenever there is one, so the
+    within-scan score moves here rather than disappearing. It is still the
+    comparison that answers "does this component stand out among its
+    siblings", which is a different question from "is this value unusual at
+    all" and occasionally the more useful one.
+    """
+    described = help_catalog.metric_tooltip(name)
+    if not frame.cohort:
+        return described
+    return f"{described}\nwithin this scan: z={frame.scan_z:+.1f}"
+
+
+def _frame_label(cohort: CohortData | None) -> str:
+    """What the panel's z-scores are measured against, in a few words."""
+    if cohort is None:
+        return "within this scan"
+    return f"vs {cohort.n_runs} scan{'' if cohort.n_runs == 1 else 's'}"
+
+
+def _metric_panel(
+    run_data: RunData, comp: ComponentData, cohort: CohortData | None
+) -> dict:
     stats = run_data.metric_stats
+    norms = cohort.norms if cohort is not None else {}
     rows: list[MetricRow] = []
     for name in stats.names:
-        s = stats.stats[name]
-        z = comp.metrics[name].z
+        value = comp.metrics[name]
+        frame = metrics.metric_frame(
+            value=value, stat=stats.stats[name], norm=norms.get(name)
+        )
+        z = frame.z
         rows.append(
             MetricRow(
                 name=name,
                 z=z,
                 abs_z=abs(z),
-                raw_fmt=f"{comp.metrics[name].raw:.3g}",
+                raw_fmt=f"{value.raw:.3g}",
                 z_fmt=f"{z:+.1f}",
                 severity=charts.severity_color(z),
-                glyph=charts.metric_glyph_svg(z, s.p5, s.p25, s.p75, s.p95, s.signal_z),
-                help_title=help_catalog.metric_tooltip(name),
+                glyph=charts.metric_glyph_svg(frame),
+                help_title=_metric_title(name, frame),
             )
         )
     outliers = sorted((r for r in rows if r.abs_z > OUTLIER_Z), key=lambda r: -r.abs_z)
@@ -170,6 +198,10 @@ def _metric_panel(run_data: RunData, comp: ComponentData) -> dict:
         "metric_families": families,
         "n_outliers": len(outliers),
         "outlier_z": OUTLIER_Z,
+        # What every z on this page is measured against. Said out loud beside
+        # the outlier count, because the count means a different thing in each
+        # frame: unusual for the study, or merely unusual for this scan.
+        "metric_frame_label": _frame_label(cohort),
     }
 
 
@@ -216,7 +248,7 @@ def _component_context(run: Run, component: Component, user: AbstractBaseUser) -
         "note_max_length": services.NOTE_MAX_LENGTH,
         "n_rated": len(user_labels),
         "tc_fd_svg": charts.timecourse_fd_svg(
-            comp.timecourse, run_data.fd, run_data.tr
+            comp.timecourse, run_data.fd, run_data.tr, motion_r2=comp.motion_r2
         ),
         "spectrum_svg": charts.spectrum_svg(comp.spectrum, run_data.frequencies),
         "rating_buttons": RATING_BUTTONS,
@@ -224,7 +256,7 @@ def _component_context(run: Run, component: Component, user: AbstractBaseUser) -
         "total_var_fmt": f"{comp.total_var:.2f}",
         "tr_fmt": f"{run_data.tr:g}",
     }
-    context.update(_metric_panel(run_data, comp))
+    context.update(_metric_panel(run_data, comp, selectors.metric_cohort()))
     return context
 
 

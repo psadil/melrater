@@ -7,7 +7,11 @@ import numpy as np
 import pytest
 
 N_COMPONENTS = 3
-N_TIMEPOINTS = 20
+#: Comfortably more than the Friston-24 expansion's 24 regressors plus an
+#: intercept. Below that the motion design saturates and every component's
+#: motion R-squared is exactly 1, which would make the value look right in
+#: assertions that were really testing nothing.
+N_TIMEPOINTS = 40
 N_BINS = 10
 SHAPE = (6, 6, 4)
 TR = 2.0

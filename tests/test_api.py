@@ -144,6 +144,40 @@ def test_push_creates_every_component(client, ingest_auth, push_bundle) -> None:
     assert Run.objects.get(uuid=uuid).components.count() == N_COMPONENTS
 
 
+def test_push_carries_the_motion_fit(client, ingest_auth, push_bundle) -> None:
+    # Arrange: the motion parameters it was computed from never reach the
+    # server, so the number itself has to travel or it is lost
+    bundle = _as_new_run(push_bundle)
+    payload = RunPayload.model_validate_json(bundle[0])
+
+    # Act
+    _post(client, bundle, ingest_auth)
+
+    # Assert
+    stored = Run.objects.get(uuid=payload.uuid).components.get(index=1)
+    assert stored.motion_r2 == pytest.approx(payload.components[0].motion_r2)
+
+
+def test_push_accepts_a_payload_from_before_the_motion_fit(
+    client, ingest_auth, push_bundle
+) -> None:
+    # Arrange: an older client has no such field to send
+    payload, tar = _as_new_run(push_bundle)
+    data = RunPayload.model_validate_json(payload).model_dump()
+    for component in data["components"]:
+        del component["motion_r2"]
+
+    # Act
+    response = _post(
+        client,
+        (RunPayload.model_validate(data).model_dump_json().encode(), tar),
+        ingest_auth,
+    )
+
+    # Assert
+    assert response.status_code == 200
+
+
 def test_push_carries_the_fix_verdicts(client, ingest_auth, push_bundle) -> None:
     # Arrange
     bundle = _as_new_run(push_bundle)

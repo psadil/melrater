@@ -12,11 +12,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from melrater.core.metrics import OUTLIER_Z
+from melrater.core.melodic import FRISTON_K
+from melrater.core.metrics import OUTLIER_Z, MetricFrame
 
 METRIC_CLIP = 6.0  # display clip for metric z-scores
 FD_REFS = (0.2, 0.5)  # mm reference lines
 PROB_FLOOR_EXP = -5.0  # left edge of the log P(signal) axis
+R2_METER_W = 52.0  # width of the motion-R^2 meter on the FD panel
 
 C_BG = "#12151a"
 C_BORDER = "#2c3442"
@@ -51,10 +53,56 @@ def _xmap(v: np.ndarray, lo: float, hi: float, x0: float, x1: float) -> np.ndarr
     return x0 + (v - lo) / (hi - lo) * (x1 - x0)
 
 
+def _motion_r2_parts(r2: float, n_timepoints: int, x1: float, y: float) -> list[str]:
+    """The FD panel's motion-R^2 readout: the figure, a meter, and chance.
+
+    The meter's faint tick is what an unrelated timecourse would score on this
+    fit — `FRISTON_K` regressors over `n_timepoints` volumes explain
+    K/(n-1) of anything by construction — so the bar is read against the tick
+    and not against zero. Without it a reader would have to know the run
+    length to know whether 0.15 was a lot.
+    """
+    x0 = x1 - R2_METER_W
+    chance = FRISTON_K / max(n_timepoints - 1, 1)
+    filled = R2_METER_W * min(max(r2, 0.0), 1.0)
+    tick = x0 + R2_METER_W * min(max(chance, 0.0), 1.0)
+    return [
+        (
+            f'<text x="{x0 - 6:.1f}" y="{y:.1f}" fill="{C_MUTED}" text-anchor="end">'
+            f"motion R&#178; {r2:.2f}</text>"
+        ),
+        (
+            f'<rect x="{x0:.1f}" y="{y - 10:.1f}" width="{R2_METER_W:.1f}" '
+            f'height="7" fill="none" stroke="{C_BORDER}"/>'
+        ),
+        (
+            f'<rect x="{x0:.1f}" y="{y - 10:.1f}" width="{filled:.1f}" height="7" '
+            f'fill="{C_FD}" opacity="0.7"><title>motion R&#178; {r2:.2f}; '
+            f"{FRISTON_K} regressors over {n_timepoints} volumes explain "
+            f"{chance:.2f} by chance</title></rect>"
+        ),
+        (
+            f'<line x1="{tick:.1f}" y1="{y - 12:.1f}" x2="{tick:.1f}" '
+            f'y2="{y - 1:.1f}" stroke="{C_MUTED}"/>'
+        ),
+    ]
+
+
 def timecourse_fd_svg(
-    timecourse: Sequence[float], fd: Sequence[float], tr: float, width: int = 376
+    timecourse: Sequence[float],
+    fd: Sequence[float],
+    tr: float,
+    motion_r2: float | None = None,
+    width: int = 376,
 ) -> str:
-    """IC timecourse and FD as two panels sharing one x axis."""
+    """IC timecourse and FD as two panels sharing one x axis.
+
+    `motion_r2` rides on the FD panel's own label line. It is the same number
+    for no two components and the same trace for all of them, which is the
+    point: the FD curve says when the head moved, the figure says how much of
+    *this* component moved with it. None for a run ingested before it was
+    computed, and then nothing is drawn.
+    """
     ts = np.asarray(timecourse, dtype=float)
     fd_arr = np.asarray(fd, dtype=float)
     ml, mr = 46, 10
@@ -110,6 +158,8 @@ def timecourse_fd_svg(
         f'<text x="{x0}" y="{m_top - 4}" fill="{C_MUTED}">IC timecourse (a.u.)</text>'
     )
     parts.append(f'<text x="{x0}" y="{fd_top - 4}" fill="{C_FD}">FD (mm)</text>')
+    if motion_r2 is not None:
+        parts.extend(_motion_r2_parts(motion_r2, len(ts), x1, fd_top - 4))
     parts.append(
         f'<text x="{(x0 + x1) / 2:.0f}" y="{fd_top + h_fd + 30}" fill="{C_MUTED}" '
         f'text-anchor="middle">time (s)</text>'
@@ -172,16 +222,18 @@ def spectrum_svg(
     return "".join(parts)
 
 
-def metric_glyph_svg(
-    z: float,
-    p5: float,
-    p25: float,
-    p75: float,
-    p95: float,
-    signal_z: Sequence[float],
-) -> str:
-    """Dot-on-distribution strip for one metric: bands, Signal ticks, this IC."""
-    w, h = 170, 22
+def metric_glyph_svg(frame: MetricFrame) -> str:
+    """Dot-on-distribution strip for one metric: bands, Signal ticks, this IC.
+
+    The bands are whichever distribution the frame chose — the cohort when
+    melrater has one, this scan's own components otherwise — and the rail
+    along the top, drawn only in the first case, is where this scan's middle
+    half falls inside it, notched at the scan's median. A rail sitting on the
+    centre means the scan is ordinary for this feature and the dot can be read
+    straight off the bands; a rail pushed to one side means the whole scan is
+    unusual, and a dot in the middle of it is unremarkable *here*.
+    """
+    w, h = 170, 26
     zx0, zx1 = 6.0, 164.0
 
     def zx(value: float) -> float:
@@ -191,26 +243,36 @@ def metric_glyph_svg(
     parts = [
         f'<svg viewBox="0 0 {w} {h}" xmlns="http://www.w3.org/2000/svg" class="glyph">'
     ]
+    if (scan := frame.scan_range) is not None:
+        parts.append(
+            f'<line x1="{zx(scan.p25):.1f}" y1="4" x2="{zx(scan.p75):.1f}" y2="4" '
+            f'stroke="{C_MUTED}" stroke-width="1.6" opacity="0.7"/>'
+        )
+        parts.append(
+            f'<line x1="{zx(scan.median):.1f}" y1="1" '
+            f'x2="{zx(scan.median):.1f}" y2="7" stroke="{C_MUTED}"/>'
+        )
     parts.append(
-        f'<rect x="{zx(p5):.1f}" y="7" width="{zx(p95) - zx(p5):.1f}" height="8" '
-        f'rx="2" fill="#2a3140"/>'
+        f'<rect x="{zx(frame.p5):.1f}" y="11" '
+        f'width="{zx(frame.p95) - zx(frame.p5):.1f}" height="8" rx="2" fill="#2a3140"/>'
     )
     parts.append(
-        f'<rect x="{zx(p25):.1f}" y="5" width="{zx(p75) - zx(p25):.1f}" height="12" '
-        f'rx="2" fill="#39424f"/>'
+        f'<rect x="{zx(frame.p25):.1f}" y="9" '
+        f'width="{zx(frame.p75) - zx(frame.p25):.1f}" height="12" rx="2" '
+        f'fill="#39424f"/>'
     )
     parts.append(
-        f'<line x1="{zx(0):.1f}" y1="2" x2="{zx(0):.1f}" y2="20" stroke="#4a5261"/>'
+        f'<line x1="{zx(0):.1f}" y1="6" x2="{zx(0):.1f}" y2="24" stroke="#4a5261"/>'
     )
-    for s in signal_z:
+    for s in frame.signal_z:
         sx = zx(float(s))
         parts.append(
-            f'<line x1="{sx:.1f}" y1="4" x2="{sx:.1f}" y2="18" '
+            f'<line x1="{sx:.1f}" y1="8" x2="{sx:.1f}" y2="22" '
             f'stroke="{C_SIGNAL}" stroke-width="1.4" opacity="0.85"/>'
         )
     parts.append(
-        f'<circle cx="{zx(z):.1f}" cy="11" r="4.2" '
-        f'fill="{severity_color(z)}" stroke="{C_BG}" stroke-width="1.2"/>'
+        f'<circle cx="{zx(frame.z):.1f}" cy="15" r="4.2" '
+        f'fill="{severity_color(frame.z)}" stroke="{C_BG}" stroke-width="1.2"/>'
     )
     parts.append("</svg>")
     return "".join(parts)

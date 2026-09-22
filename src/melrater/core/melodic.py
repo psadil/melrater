@@ -19,6 +19,12 @@ import numpy as np
 
 FIX_FILE_RE = re.compile(r"fix4melview_(?P<model>.+)_thr(?P<thr>\d+)\.txt$")
 
+#: Regressors in the Friston-24 motion expansion, not counting the intercept.
+#: Exported because the chart draws the R-squared an unrelated timecourse
+#: would score on this many of them, and that level is only meaningful
+#: alongside the fit it came from.
+FRISTON_K = 24
+
 #: The classification vocabulary, duplicated from Classification.Label so
 #: that this module stays Django-free. A verdict outside it is refused at
 #: parse time rather than stored: SQLite does not enforce max_length, so an
@@ -101,6 +107,7 @@ class MelodicSource:
     ftmix: np.ndarray  # (n_bins, n_components) power spectra
     icstats: np.ndarray  # (n_components, 2): explained %, total %
     fd: np.ndarray  # (n_timepoints,) framewise displacement (mm)
+    motion_r2: np.ndarray  # (n_components,) R^2 on the Friston-24 expansion
     frequencies: np.ndarray  # (n_bins,) Hz
     feature_names: list[str]
     features: np.ndarray  # (n_components, n_features)
@@ -144,6 +151,49 @@ def fd_power(params: np.ndarray) -> np.ndarray:
         np.diff(rot, axis=0)
     ).sum(axis=1)
     return np.concatenate([[0.0], fd])
+
+
+def friston24(params: np.ndarray) -> np.ndarray:
+    """Friston et al.'s 24-parameter expansion of the motion parameters.
+
+    The six realignment parameters, the same six one volume earlier, and the
+    squares of both sets — the autoregressive model Friston et al. (1996)
+    proposed for spin-history effects, and the one "Friston 24" names. The
+    lagged block is zero-filled at the first volume, as every implementation
+    of it does: there is no earlier volume, and a regressor has to have a
+    value there.
+
+    Deliberately the lagged parameters rather than their temporal
+    derivatives. The two spans agree on the linear half and disagree on the
+    squares, and it is the published form that gets to keep the name.
+    """
+    previous = np.vstack([np.zeros((1, params.shape[1])), params[:-1]])
+    return np.hstack([params, previous, params**2, previous**2])
+
+
+def motion_r2(design: np.ndarray, timecourses: np.ndarray) -> np.ndarray:
+    """Fraction of each timecourse's variance a motion design explains.
+
+    Ordinary least squares with an intercept, one fit per component, solved
+    through `lstsq` rather than the normal equations: the squared columns of
+    a Friston-24 design are collinear whenever a parameter never moves (a
+    phantom, or an axis mcflirt left at zero), and the minimum-norm solution
+    an SVD gives still has a well-defined fitted series where an inverse
+    would not exist at all.
+
+    A constant timecourse explains nothing and is scored 0 rather than
+    dividing by its own zero variance.
+    """
+    x = np.hstack([np.ones((design.shape[0], 1)), design])
+    fitted = x @ np.linalg.lstsq(x, timecourses, rcond=None)[0]
+    residual = ((timecourses - fitted) ** 2).sum(axis=0)
+    total = ((timecourses - timecourses.mean(axis=0)) ** 2).sum(axis=0)
+    explained = 1.0 - np.divide(
+        residual, total, out=np.ones_like(total), where=total > 0
+    )
+    # floating point puts an exact fit a hair either side of 1, and a
+    # rank-deficient one a hair below 0
+    return np.clip(explained, 0.0, 1.0)
 
 
 def load_features(path: Path) -> tuple[list[str], np.ndarray]:
@@ -224,6 +274,7 @@ def load_run(inputs: RunInputs) -> MelodicSource:
         ftmix=ftmix,
         icstats=icstats,
         fd=fd_power(inputs.motion),
+        motion_r2=motion_r2(friston24(inputs.motion), mix),
         frequencies=frequencies,
         feature_names=feature_names,
         features=features,

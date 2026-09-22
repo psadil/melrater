@@ -121,6 +121,15 @@ class Component(models.Model):
     timecourse = models.JSONField()
     spectrum = models.JSONField()
     metrics = models.JSONField(help_text="Per-metric raw value and robust z-score")
+    # How much of this timecourse ordinary least squares on the Friston-24
+    # motion expansion accounts for (melodic.motion_r2), shown on the FD
+    # chart. Nullable because it cannot be backfilled: the motion parameters
+    # it is computed from live beside the niftis, and a server holds neither.
+    # A run ingested before this existed keeps None, and the chart says
+    # nothing rather than saying zero.
+    motion_r2 = models.FloatField(
+        null=True, blank=True, help_text="R^2 of this timecourse on Friston-24 motion"
+    )
 
     objects: ClassVar[ComponentManager] = ComponentManager()
 
@@ -140,6 +149,49 @@ class Component(models.Model):
 
     def __str__(self) -> str:
         return f"{self.run} IC {self.index}"
+
+
+class MetricCohortManager(models.Manager["MetricCohort"]):
+    def get_by_natural_key(self, key: str) -> MetricCohort:
+        return self.get(key=key)
+
+
+class MetricCohort(models.Model):
+    """The distributions every metric strip on the rating screen is read against.
+
+    One scan's components are thin evidence for what an unusual value looks
+    like, so a strip is drawn against every component of every scan this
+    database holds. That pooling is what this row is: `refresh_metric_cohort`
+    rebuilds it from the stored metrics, and `selectors.metric_cohort` reads
+    it once per page.
+
+    Stored rather than computed per request because the pass that builds it
+    reads every component in the database — minutes of work at campaign
+    scale, which cannot happen behind a page load. Derived rather than
+    authored, so losing it costs nothing but the command: until one exists,
+    every strip falls back to the scan it belongs to.
+    """
+
+    #: There is one cohort. Keeping that as a unique column rather than a
+    #: convention is what makes `update_or_create` idempotent, and gives the
+    #: row the natural key a fixture needs.
+    KEY = "current"
+
+    key = models.CharField(max_length=20, unique=True, default=KEY, editable=False)
+    n_runs = models.PositiveIntegerField()
+    n_components = models.PositiveIntegerField()
+    norms = models.JSONField(
+        help_text="Per-metric cohort centre, scale and percentile bands"
+    )
+    computed_at = models.DateTimeField(auto_now=True)
+
+    objects: ClassVar[MetricCohortManager] = MetricCohortManager()
+
+    def natural_key(self) -> tuple[str]:
+        return (str(self.key),)
+
+    def __str__(self) -> str:
+        return f"{len(self.norms)} metrics over {self.n_components} components"
 
 
 class ReviewerManager(models.Manager["Reviewer"]):

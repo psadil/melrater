@@ -221,7 +221,10 @@ img[data-bg-img="func"] { image-rendering: pixelated; }
   flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; color: var(--text); font-size: 12px;
 }
-.glyph { flex: none; width: 140px; height: 20px; }
+/* 170x26 viewBox, so the height follows the width or the strip letterboxes */
+.glyph { flex: none; width: 140px; height: 21px; }
+/* which distribution every z on the panel is measured against */
+.metric-frame { color: var(--muted); font-size: 11px; margin-bottom: 2px; }
 .metric-val {
   flex: none; width: 96px; text-align: right; font-size: 11px;
   color: var(--muted); font-variant-numeric: tabular-nums;

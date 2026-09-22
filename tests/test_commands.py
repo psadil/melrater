@@ -10,7 +10,7 @@ from django.core.management.base import CommandError
 
 from melrater.core import lake
 from melrater.core.api import INGEST_GROUP
-from melrater.core.models import Run
+from melrater.core.models import MetricCohort, Run
 from tests.conftest import montage_dir, run_inputs
 
 pytestmark = pytest.mark.django_db
@@ -191,3 +191,63 @@ def test_prune_dry_run_deletes_nothing(ingested_run: Run, media_root: Path) -> N
 
     # Assert
     assert (media_root / "runs" / str(uuid)).exists()
+
+
+# --- refresh_metric_cohort ----------------------------------------------
+
+
+def test_refresh_metric_cohort_pools_every_component(ingested_run: Run) -> None:
+    # Act
+    call_command("refresh_metric_cohort")
+
+    # Assert
+    assert MetricCohort.objects.get().n_components == ingested_run.components.count()
+
+
+def test_refresh_metric_cohort_counts_the_runs_it_pooled(ingested_run: Run) -> None:
+    # Act
+    call_command("refresh_metric_cohort")
+
+    # Assert: the page says this number, so it is the claim being made
+    assert MetricCohort.objects.get().n_runs == 1
+
+
+def test_refresh_metric_cohort_norms_every_stored_metric(ingested_run: Run) -> None:
+    # Act
+    call_command("refresh_metric_cohort")
+
+    # Assert: `const` never reached a component row, being constant in the run
+    assert set(MetricCohort.objects.get().norms) == {"featA", "featB", "featC"}
+
+
+def test_refresh_metric_cohort_records_the_pooled_centre(ingested_run: Run) -> None:
+    # Act
+    call_command("refresh_metric_cohort")
+
+    # Assert: featA = [1, 2, 30] is the whole cohort here, so its median is 2
+    norms = MetricCohort.objects.get().norms
+    assert norms["featA"]["median"] == pytest.approx(2.0)
+
+
+def test_refresh_metric_cohort_dry_run_stores_nothing(ingested_run: Run) -> None:
+    # Act
+    call_command("refresh_metric_cohort", "--dry-run")
+
+    # Assert
+    assert not MetricCohort.objects.exists()
+
+
+def test_refresh_metric_cohort_says_so_with_nothing_to_pool(capsys) -> None:
+    # Act
+    call_command("refresh_metric_cohort")
+
+    # Assert
+    assert "no components to pool" in capsys.readouterr().out
+
+
+def test_refresh_metric_cohort_leaves_no_cohort_when_there_is_nothing_to_pool() -> None:
+    # Act
+    call_command("refresh_metric_cohort")
+
+    # Assert: an empty cohort would claim every strip has a reference it does not
+    assert not MetricCohort.objects.exists()

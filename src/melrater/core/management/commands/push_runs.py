@@ -127,6 +127,13 @@ class Command(TyperCommand):
             f"{len(runs)} run(s): {n_pushed} {verb}, {n_skipped} already current, "
             f"{len(failures)} failed"
         )
+        if n_pushed and not dry_run:
+            # the cohort is per database, and this command cannot rebuild the
+            # far one: it has no route to anything but the ingest endpoint
+            self.stdout.write(
+                "the server's metric cohort now omits these runs; run "
+                "`refresh_metric_cohort` there"
+            )
         if failures:
             for label, reason in failures:
                 self.stderr.write(self.style.ERROR(f"  {label}: {reason}"))

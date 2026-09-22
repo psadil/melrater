@@ -223,6 +223,14 @@ class Command(TyperCommand):
             f"{total} run(s): {n_ingested} {verb}, {n_skipped} already present, "
             f"{len(failures)} failed"
         )
+        if n_ingested and not dry_run:
+            # nothing folds a new run into the metric strips on its own: the
+            # cohort is a pass over every component, which is not something to
+            # do once per ingested run
+            self.stdout.write(
+                "run `refresh_metric_cohort` to read these into the metric "
+                "strips — on the server too, for runs pushed there"
+            )
         for failure in failures:
             self.stderr.write(self.style.ERROR(f"  {failure.label}: {failure.reason}"))
         if not_pushed:

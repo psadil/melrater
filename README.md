@@ -2,7 +2,7 @@
 
 A web app for reviewing MELODIC ICA components, modeled on [fsleyes's melodic scene](https://open.oxcin.ox.ac.uk/pages/fsl/fsleyes/fsleyes/userdoc/ic_classification.html) with two additions:
 
-- **More context per component** — the framewise-displacement (motion) timecourse rendered time-aligned under the IC timecourse, and every pyFIX classifier metric shown against its distribution across the run's components (outliers surfaced first).
+- **More context per component** — the framewise-displacement (motion) timecourse rendered time-aligned under the IC timecourse, captioned with how much of *this* component's timecourse head motion explains, and every pyFIX classifier metric shown against its distribution across every component of every scan (outliers surfaced first).
 - **Integrated multi-reviewer classification** — automated pyFIX verdicts are stored as reviewers (a model + threshold, e.g. `UKBiobank @ thr1`) alongside human reviewers.
 - **A place to argue about a component** — each one has a discussion thread, which opens to a reviewer once they have rated it, plus a private note that only its author ever sees.
 
@@ -56,6 +56,16 @@ Each component is also rendered at two smoothing levels: the z-map as MELODIC wr
 
 Indexing and ingesting a tree that a pipeline is still filling is a thing you do over and over, so it is one script: see [The whole thing, repeatedly](#the-whole-thing-repeatedly).
 
+### The metric cohort
+
+Every pyFIX metric on the rating screen is a robust z-score, and what it is scored against is every component of every scan the database holds. That reference has to be built, because computing it reads every component:
+
+```sh
+pixi run manage refresh_metric_cohort
+```
+
+Run it after a batch of ingests, and **again on the server** after a batch of pushes — the cohort is per database, and `push_runs` has no route to anything but the ingest endpoint. It is a single pass: about a second for a thousand components, so a few minutes for the full campaign. Until it has ever run, and for a feature too new to be in it, the rating screen falls back to scoring a component against its own scan's components alone; the metrics panel says which comparison it is making, because "3 outlier metrics" means a different thing in each. Features that never vary within a scan (`nic`, `dim:*`, `pixdim:*`) are dropped at ingest and so cannot be pooled, even though they do vary between scans.
+
 ## Rate
 
 ```sh
@@ -69,6 +79,8 @@ Keyboard shortcuts on a component page: `1`/`s`, `2`/`u`, `3`/`n` to rate, `←`
 On `m`: the smoothed map is per-component rescaled, so read cluster count, size and placement rather than absolute colour. It is the view for a network's shape, a vein along the sinus, CSF in the ventricles or a white-matter pattern; the unsmoothed map is the view for stripes, checkerboards, the mixed signs of a susceptibility artefact and where a peak actually sits.
 
 On `b`: the structural is sharper and much easier to name a structure on, but FEAT registers it to the functional with a *linear* transform and nothing models EPI susceptibility distortion, so orbitofrontal, temporal-pole and sinus-adjacent voxels can be several millimetres out. It tells you what a component is sitting on; it is not evidence that the functional data are where it says they are. Judge a component that hugs the brain edge, a sinus or a ventricle on the functional background, which carries the true EPI geometry.
+
+On the motion figure: the FD trace under the timecourse is the same for every component of a run, so the number beside it — the R² of ordinary least squares fitting this component's timecourse on the Friston-24 motion expansion (the six realignment parameters, the same six one volume earlier, and the squares of both) — is the part of that panel that is about the component on screen. Read it against the faint tick on its meter, never against zero: 24 regressors explain 24/(volumes − 1) of *anything*, which is about 0.06 for a 435-volume run and 0.24 for a 100-volume one. Well past the tick says head motion accounts for much of this timecourse; near it says nothing either way. It is computed at ingest from the motion parameters, which never reach the server, so a run ingested before this existed has no value and its panel simply says nothing — re-ingest to give it one.
 
 ### Notes and discussion
 

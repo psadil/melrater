@@ -45,6 +45,10 @@ url = "https://doi.org/10.1002/mrm.1910340111"
 text = "Taylor et al. (2025), Go Figure"
 url = "https://doi.org/10.52294/001c.125391"
 
+[refs.friston1996]
+text = "Friston et al. (1996), Magnetic Resonance in Medicine 35:346-355"
+url = "https://doi.org/10.1002/mrm.1910350312"
+
 [refs.griffanti2017]
 text = "Griffanti et al. (2017), Hand classification of fMRI ICA noise components, NeuroImage 154:188-205"
 url = "https://doi.org/10.1016/j.neuroimage.2016.12.036"
@@ -116,8 +120,12 @@ bullets = [
   "one gridline every 60 seconds",
   "dashed lines mark FD = 0.2 mm (amber) and 0.5 mm (red), the usual scrubbing thresholds",
   "spikes that coincide with FD spikes are motion, whatever the spatial map looks like",
+  "motion R-squared, top right, is how much of this component's timecourse ordinary least squares on the Friston-24 motion expansion accounts for: the six realignment parameters, the same six one volume earlier, and the squares of both",
+  "the FD trace is the same for every component of a run; the R-squared is not, so it is the part of this panel that is about the component you are looking at",
+  "the faint tick on the meter is what an unrelated timecourse scores. Twenty-four regressors explain 24/(volumes-1) of anything at all, so read the bar against the tick and never against zero",
+  "well past the tick says head motion accounts for much of this timecourse, which is evidence of noise wherever the spatial map is ambiguous; near it says nothing either way, not that the component is clean",
 ]
-refs = ["power2012"]
+refs = ["power2012", "friston1996"]
 
 [chart.spectrum]
 title = "power spectrum"
@@ -134,16 +142,21 @@ bullets = [
 [chart.metric_glyph]
 title = "reading a metric strip"
 body = """
-Each row is one pyFIX feature, shown as a robust z-score measured across this \
-run's own components. The strip therefore says how unusual this component is \
-here — not how it compares with any external norm."""
+Each row is one pyFIX feature, shown as a robust z-score. The bands are every \
+component of every scan melrater holds, so the strip says how unusual this \
+component's value is for the study and not merely for its own run — one run's \
+few dozen components are thin evidence for what unusual means. The rail above \
+the bands is where this run's own middle half falls, which is the comparison \
+the strip used to make on its own."""
 bullets = [
-  "wide dark bar: 5th to 95th percentile across this run's components",
-  "lighter inner bar: 25th to 75th percentile",
-  "vertical line: the run's median, which is z = 0 by construction",
-  "green ticks: where the components FIX called Signal fall on this feature",
+  "wide dark bar: 5th to 95th percentile across every component of every scan",
+  "lighter inner bar: 25th to 75th percentile of the same",
+  "vertical line: the cohort median, which is z = 0 by construction",
+  "thin rail on top: this run's own 25th to 75th percentile, notched at its median. On the centre means the run is ordinary for this feature; pushed to one side means the whole run is, and a dot inside the rail is unremarkable here whatever the bands say",
+  "green ticks: where the components FIX called Signal in this run fall",
   "dot: this component. Grey up to |z| = 2, amber to 3, red beyond",
   "the axis is clipped at |z| = 6, so a dot at the edge may be far outside it",
+  "the panel says which comparison it is making. Before the cohort has been built, and for a feature too new to be in it, the bands are this run's components and there is no rail",
 ]
 refs = ["salimi2014"]
 
@@ -254,13 +267,16 @@ care than a low-variance one."""
 title = "outlying metrics"
 body = """
 How many of this component's pyFIX features sit more than 3 robust z from the \
-run's median. Robust z is (value - median) / (1.4826 x MAD), computed feature \
-by feature across this run's components, so a handful of extreme components \
-cannot inflate the scale the way a standard deviation would. Features that are \
-constant across the run carry no information and are dropped before scoring."""
+median. Robust z is (value - median) / (1.4826 x MAD), computed feature by \
+feature, so a handful of extreme components cannot inflate the scale the way a \
+standard deviation would. The chip says what the median and the scale are \
+taken over: every component of every scan melrater holds, or — before that \
+cohort has been built — this run's components alone. Features that are \
+constant carry no information and are dropped before scoring."""
 bullets = [
-  "a high count means this component is unusual for this run, not that it is necessarily noise",
+  "a high count means this component is unusual, not that it is necessarily noise",
   "zero is common and unremarkable, especially for low-variance components",
+  "against the cohort, a whole run can be unusual: every component of a badly corrupted scan may be flagged, and that is the finding rather than an error",
 ]
 
 

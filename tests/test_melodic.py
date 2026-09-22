@@ -75,6 +75,106 @@ def test_fd_equals_translation_ramp_step(melodic_dir: Path) -> None:
     assert np.allclose(fd[1:], FD_STEP)
 
 
+# --- the Friston-24 motion fit -------------------------------------------
+
+
+@pytest.fixture
+def params() -> np.ndarray:
+    """Six realignment parameters that each count up, so a lag is visible."""
+    return np.tile(np.arange(5.0)[:, None], (1, 6))
+
+
+def test_friston24_expands_six_parameters_into_twenty_four(
+    params: np.ndarray,
+) -> None:
+    assert melodic.friston24(params).shape == (5, melodic.FRISTON_K)
+
+
+def test_friston24_lags_the_second_block_by_one_volume(params: np.ndarray) -> None:
+    # Act
+    design = melodic.friston24(params)
+
+    # Assert: column 6 is the first parameter one volume earlier, zero-filled
+    assert design[:, 6].tolist() == [0.0, 0.0, 1.0, 2.0, 3.0]
+
+
+def test_friston24_squares_the_current_block(params: np.ndarray) -> None:
+    # Act
+    design = melodic.friston24(params)
+
+    # Assert
+    assert design[:, 12].tolist() == [0.0, 1.0, 4.0, 9.0, 16.0]
+
+
+def test_friston24_squares_the_lagged_block(params: np.ndarray) -> None:
+    # Act
+    design = melodic.friston24(params)
+
+    # Assert
+    assert design[:, 18].tolist() == [0.0, 0.0, 1.0, 4.0, 9.0]
+
+
+def test_motion_r2_is_the_variance_fraction_the_design_reaches() -> None:
+    # Arrange: x and e are orthogonal, centred and the same size, so exactly
+    # half of (x + e)'s variance is reachable from a design of x alone
+    x = np.array([[1.0], [-1.0], [1.0], [-1.0]])
+    e = np.array([[1.0], [1.0], [-1.0], [-1.0]])
+
+    # Act
+    r2 = melodic.motion_r2(x, x + e)
+
+    # Assert
+    assert r2[0] == pytest.approx(0.5)
+
+
+def test_motion_r2_explains_a_timecourse_built_from_the_design() -> None:
+    # Arrange
+    rng = np.random.default_rng(3)
+    design = melodic.friston24(rng.normal(size=(60, 6)))
+
+    # Act
+    r2 = melodic.motion_r2(design, design @ rng.normal(size=(melodic.FRISTON_K, 1)))
+
+    # Assert
+    assert r2[0] == pytest.approx(1.0)
+
+
+def test_motion_r2_scores_a_flat_timecourse_zero() -> None:
+    # Arrange: a constant has no variance for a design to explain, and its own
+    # zero is not something to divide by
+    x = np.arange(10.0)[:, None]
+
+    # Act
+    r2 = melodic.motion_r2(x, np.ones((10, 1)))
+
+    # Assert
+    assert r2[0] == 0.0
+
+
+def test_motion_r2_survives_a_parameter_that_never_moves() -> None:
+    # Arrange: the synthetic run moves along one axis only, so most of the
+    # expansion is zero columns and the normal equations would be singular
+    design = melodic.friston24(np.zeros((30, 6)))
+
+    # Act
+    r2 = melodic.motion_r2(design, np.arange(30.0)[:, None])
+
+    # Assert
+    assert r2[0] == 0.0
+
+
+def test_load_run_scores_every_component_against_motion(
+    source: melodic.MelodicSource,
+) -> None:
+    assert source.motion_r2.shape == (N_COMPONENTS,)
+
+
+def test_load_run_keeps_every_motion_score_a_fraction(
+    source: melodic.MelodicSource,
+) -> None:
+    assert np.all((source.motion_r2 >= 0.0) & (source.motion_r2 <= 1.0))
+
+
 def test_parse_fix_file_identifies_reviewer(melodic_dir: Path) -> None:
     # Act
     result = melodic.parse_fix_file(melodic_dir / "fix4melview_TestModel_thr5.txt")

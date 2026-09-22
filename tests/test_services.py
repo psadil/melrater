@@ -10,9 +10,11 @@ from melrater.core.models import (
     Classification,
     Component,
     DiscussionPost,
+    MetricCohort,
     Reviewer,
     Run,
 )
+from melrater.core.schemas import MetricNorm
 from tests.conftest import (
     N_COMPONENTS,
     N_TIMEPOINTS,
@@ -44,6 +46,18 @@ def test_ingest_stores_full_timecourse(ingested_run: Run) -> None:
 
 def test_ingest_stores_component_metrics(ingested_run: Run) -> None:
     assert "featA" in ingested_run.components.get(index=1).metrics
+
+
+def test_ingest_scores_each_component_against_motion(ingested_run: Run) -> None:
+    # a fraction of variance, so a fraction; the fit itself is melodic's
+    assert 0.0 <= ingested_run.components.get(index=1).motion_r2 <= 1.0
+
+
+def test_ingest_records_the_raw_scale_its_metric_bands_are_on(
+    ingested_run: Run,
+) -> None:
+    # featA = [1, 2, 30] across the three components: median 2, MAD 1
+    assert ingested_run.metric_stats["stats"]["featA"]["median"] == pytest.approx(2.0)
 
 
 def test_ingest_names_fix_reviewer(ingested_run: Run) -> None:
@@ -653,3 +667,28 @@ def test_deleting_a_run_takes_its_discussion_with_it(rated, user) -> None:
 
     # Assert
     assert not DiscussionPost.objects.exists()
+
+
+# --- the metric cohort -------------------------------------------------------
+
+
+NORM = MetricNorm(median=1.0, scale=2.0, p5=-2.0, p25=-1.0, p75=1.0, p95=2.0, n=9)
+
+
+def test_store_metric_cohort_keeps_the_norms_it_was_given() -> None:
+    # Act
+    services.store_metric_cohort(norms={"featA": NORM}, n_runs=2, n_components=9)
+
+    # Assert
+    assert MetricCohort.objects.get().norms["featA"]["scale"] == pytest.approx(2.0)
+
+
+def test_store_metric_cohort_replaces_rather_than_accumulates() -> None:
+    # Arrange
+    services.store_metric_cohort(norms={"featA": NORM}, n_runs=2, n_components=9)
+
+    # Act
+    services.store_metric_cohort(norms={"featB": NORM}, n_runs=3, n_components=12)
+
+    # Assert: one cohort, and it is the new one
+    assert list(MetricCohort.objects.get().norms) == ["featB"]

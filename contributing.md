@@ -126,6 +126,25 @@ task's own env, where it wins.
   `atomic()` block holds the one write lock for its whole duration, so keep
   slow work out of it — `ingest_run` renders and stores montages *before*
   opening its transaction for exactly this reason.
+- **A metric is read in two frames, and `metrics.py` owns the choice.**
+  Within a scan, `Run.metric_stats` holds each feature's bands in that scan's
+  robust-z units; across the study, the one `MetricCohort` row holds the same
+  thing pooled over every component in the database. `metric_frame` picks the
+  cohort when it knows the feature and the scan when it does not, restates the
+  scan's bands and Signal ticks in whichever it picked, and hands the view a
+  single object — so nothing downstream branches on which frame it got, and
+  `MetricFrame.cohort` is there only so the page can say so out loud. That
+  conversion is why `MetricStat` carries `median` and `scale`: they are the
+  only way back from stored z units to the raw values another frame scores.
+  The cohort is derived state, rebuilt by `refresh_metric_cohort` and never
+  on its own — it reads every component, so it cannot live behind a page
+  load — and everything degrades to the scan frame while it is missing.
+- **`Component.motion_r2` cannot be backfilled.** It is fitted at ingest from
+  the motion parameters, which live beside the niftis; a server holds
+  neither, and `refresh_pushed_run` rewrites nothing but the montage columns.
+  So it is nullable on the model and defaulted on the wire, None means "never
+  computed", and the FD panel draws nothing rather than drawing zero. A run
+  that predates it gains one by being re-ingested, not by being re-pushed.
 - **Charts** (`charts.py`) are hand-rolled SVG rendered with `|safe`. Every
   value interpolated into them is a float or a palette constant, and labels are
   used only as dictionary keys; keep it that way, or the templates need

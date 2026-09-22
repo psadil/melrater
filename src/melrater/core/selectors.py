@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import array
 import io
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -9,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from uuid import UUID
 
+import numpy as np
 from django.contrib.auth.models import AbstractBaseUser
 from django.core.paginator import Page, Paginator
 from django.db.models import Count, Min, Q
@@ -20,10 +22,12 @@ from melrater.core.models import (
     Classification,
     Component,
     DiscussionPost,
+    MetricCohort,
     Reviewer,
     Run,
 )
 from melrater.core.schemas import (
+    CohortData,
     ComponentData,
     ComponentPayload,
     FixReviewerPayload,
@@ -171,6 +175,56 @@ def run_data(run: Run) -> RunData:
 def component_data(component: Component) -> ComponentData:
     """Typed projection of a Component row."""
     return ComponentData.model_validate(component)
+
+
+def metric_cohort() -> CohortData | None:
+    """The stored cohort distributions, or None before one has been built.
+
+    None is an ordinary state, not an error: a fresh database has no cohort
+    until `refresh_metric_cohort` has run, and every metric strip falls back
+    to the scan it belongs to meanwhile.
+    """
+    row = MetricCohort.objects.first()
+    return CohortData.model_validate(row) if row is not None else None
+
+
+@dataclass(frozen=True)
+class MetricSweep:
+    """Every stored raw metric value, pooled by metric name."""
+
+    values: dict[str, np.ndarray]
+    n_runs: int
+    n_components: int
+
+
+def metric_raw_values(*, chunk_size: int = 2000) -> MetricSweep:
+    """Read every component's raw metric values, for a cohort rebuild.
+
+    Streamed and accumulated as float32 rather than materialised: the full
+    campaign is a few hundred thousand components with ~186 features each, and
+    the same numbers as Python floats in lists would be gigabytes where these
+    are a couple of hundred megabytes. `.iterator()` is what keeps the
+    queryset from also holding every row it has already handed over.
+
+    A metric missing from a component simply contributes no value — features
+    that are constant within one scan are dropped there, and a scan that
+    dropped one is not evidence about it either way.
+    """
+    pooled: dict[str, array.array[float]] = {}
+    n_components = 0
+    stored = Component.objects.values_list("metrics", flat=True)
+    for row in stored.iterator(chunk_size=chunk_size):
+        n_components += 1
+        for name, value in row.items():
+            pooled.setdefault(name, array.array("f")).append(value["raw"])
+    return MetricSweep(
+        values={
+            name: np.frombuffer(buffer, dtype=np.float32)
+            for name, buffer in pooled.items()
+        },
+        n_runs=Run.objects.count(),
+        n_components=n_components,
+    )
 
 
 @dataclass(frozen=True)

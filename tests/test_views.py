@@ -1,6 +1,7 @@
 import re
 
 import pytest
+from django.core.management import call_command
 
 from melrater.core import selectors, services
 from melrater.core.models import Classification, DiscussionPost, Run
@@ -574,6 +575,72 @@ def test_component_page_leaks_no_template_syntax(logged_in, ingested_run: Run) -
     body = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/").content.decode()
 
     assert "{#" not in body and "{%" not in body
+
+
+# --- metric frame -------------------------------------------------------
+
+
+def test_component_page_compares_metrics_within_the_scan_without_a_cohort(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act: nothing has built a cohort, so a run can only place itself
+    body = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/").content.decode()
+
+    # Assert
+    assert "z within this scan" in body
+
+
+@pytest.fixture
+def cohort_page(logged_in, ingested_run: Run) -> str:
+    """The rating page once a cohort has been built from this database."""
+    call_command("refresh_metric_cohort")
+    return logged_in.get(f"/runs/{ingested_run.pk}/ic/1/").content.decode()
+
+
+def test_component_page_says_how_many_scans_its_metrics_are_read_against(
+    cohort_page: str,
+) -> None:
+    # Assert: the count is the claim, so the page states it rather than
+    # leaving "unusual" to mean whichever frame the reader assumes
+    assert "z vs 1 scan<" in cohort_page
+
+
+def test_component_page_rails_the_scans_own_range_over_the_cohort(
+    cohort_page: str,
+) -> None:
+    # Assert: the within-scan comparison survives the change of frame, as the
+    # thin rail the glyph draws above the cohort bands
+    assert 'stroke="#8b93a1" stroke-width="1.6"' in cohort_page
+
+
+def test_component_page_keeps_the_within_scan_score_in_the_row_tooltip(
+    cohort_page: str,
+) -> None:
+    # Assert: the number beside the strip is the cohort's, so this one moves
+    # rather than disappearing
+    assert "within this scan: z=" in cohort_page
+
+
+def test_component_page_reports_the_motion_fit(logged_in, ingested_run: Run) -> None:
+    # Act
+    body = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/").content.decode()
+
+    # Assert: the FD trace is the same for every component of a run; this is
+    # the part of that panel that is about the one on screen
+    assert "motion R&#178;" in body
+
+
+def test_component_page_says_nothing_about_motion_without_a_fit(
+    logged_in, ingested_run: Run
+) -> None:
+    # Arrange: a run ingested before the fit existed
+    ingested_run.components.update(motion_r2=None)
+
+    # Act
+    body = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/").content.decode()
+
+    # Assert
+    assert "motion R&#178;" not in body
 
 
 # --- help bubbles -------------------------------------------------------

@@ -12,6 +12,7 @@ laptop, ``api.py`` validates one on the server — so the two cannot drift.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -35,8 +36,16 @@ class MetricValue(BaseModel):
 
 
 class MetricStat(BaseModel):
-    """One metric's distribution across a run's components (robust-z units)."""
+    """One metric's distribution across a run's components (robust-z units).
 
+    ``median`` and ``scale`` are the raw-unit centre and spread those z units
+    are measured against, and they are the way back out of them: a cohort
+    z-score is a different scale over the same raw values, so without these a
+    band could only ever be drawn in the frame it was computed in.
+    """
+
+    median: float
+    scale: float
     p5: float
     p25: float
     p75: float
@@ -50,6 +59,35 @@ class MetricStats(BaseModel):
     names: list[str]
     dropped: list[str]
     stats: dict[str, MetricStat]
+
+
+class MetricNorm(BaseModel):
+    """One metric's distribution across every component melrater holds.
+
+    Same shape as :class:`MetricStat` minus the Signal ticks, which are a
+    property of one scan's classifier run and mean nothing pooled. The
+    percentiles are in this norm's own z units; ``median`` and ``scale`` are
+    raw, and are what a stored raw value is scored against.
+    """
+
+    median: float
+    scale: float
+    p5: float
+    p25: float
+    p75: float
+    p95: float
+    n: int  # components that contributed a value
+
+
+class CohortData(BaseModel):
+    """Typed projection of the MetricCohort row."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    n_runs: int
+    n_components: int
+    computed_at: datetime
+    norms: dict[str, MetricNorm]
 
 
 class RunData(BaseModel):
@@ -82,6 +120,7 @@ class ComponentData(BaseModel):
     timecourse: list[float]
     spectrum: list[float]
     metrics: dict[str, MetricValue]
+    motion_r2: float | None
 
 
 # --- the ingest API's wire contract --------------------------------------
@@ -113,6 +152,13 @@ class ComponentPayload(BaseModel):
     timecourse: list[float]
     spectrum: list[float]
     metrics: dict[str, MetricValue]
+    #: R-squared of this timecourse on the Friston-24 motion expansion.
+    #: Defaulted rather than required, for the reason `backgrounds` is: a run
+    #: ingested before it was computed has no value to send, and the motion
+    #: parameters it would be computed from are not on the server. None means
+    #: "never computed", and the FD chart then says nothing about motion
+    #: rather than saying zero.
+    motion_r2: float | None = None
 
 
 class RunPayload(BaseModel):

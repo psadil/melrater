@@ -23,10 +23,11 @@ from melrater.core.models import (
     Classification,
     Component,
     DiscussionPost,
+    MetricCohort,
     Reviewer,
     Run,
 )
-from melrater.core.schemas import FixReviewerPayload, RunPayload
+from melrater.core.schemas import FixReviewerPayload, MetricNorm, RunPayload
 
 logger = logging.getLogger("melrater.ingest")
 
@@ -300,6 +301,7 @@ def ingest_run(*, source: melodic.MelodicSource, image_workers: int = 0) -> Run:
                     total_var=float(source.icstats[i, 1]),
                     timecourse=[float(v) for v in source.mix[:, i]],
                     spectrum=[float(v) for v in source.ftmix[:, i]],
+                    motion_r2=float(source.motion_r2[i]),
                     metrics={
                         name: value.model_dump()
                         for name, value in metrics.compute_component_metrics(
@@ -374,6 +376,27 @@ _MONTAGE_FIELDS = (
     "montage_smoothings",
     "montage_picks",
 )
+
+
+def store_metric_cohort(
+    *, norms: dict[str, MetricNorm], n_runs: int, n_components: int
+) -> MetricCohort:
+    """Replace the stored cohort with a freshly computed one.
+
+    An update rather than an insert-and-delete: the row is what every metric
+    strip is drawn against, and there is no moment at which it should be
+    missing. A rebuild that never finishes leaves the previous cohort in
+    place, which is stale but still a cohort.
+    """
+    cohort, _ = MetricCohort.objects.update_or_create(
+        key=MetricCohort.KEY,
+        defaults={
+            "n_runs": n_runs,
+            "n_components": n_components,
+            "norms": {name: norm.model_dump() for name, norm in norms.items()},
+        },
+    )
+    return cohort
 
 
 def delete_run(*, run: Run) -> None:
@@ -562,6 +585,7 @@ def create_pushed_run(*, payload: RunPayload) -> Run:
                 total_var=component.total_var,
                 timecourse=component.timecourse,
                 spectrum=component.spectrum,
+                motion_r2=component.motion_r2,
                 metrics={
                     name: value.model_dump()
                     for name, value in component.metrics.items()
