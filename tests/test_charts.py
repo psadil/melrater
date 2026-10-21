@@ -139,20 +139,20 @@ def test_metric_glyph_rails_the_scan_range_over_the_cohort_bands(
 
 @pytest.fixture
 def prob_entries() -> list[charts.ProbEntry]:
-    # one rated (disagreeing with FIX) and one unrated component
+    # two rated components, the first disagreeing with FIX (above thr, Noise)
     return [
-        charts.ProbEntry(index=1, p_signal=0.9, fix_label="Signal", user_label="Noise"),
-        charts.ProbEntry(index=2, p_signal=0.001, fix_label="Noise", user_label=None),
+        charts.ProbEntry(index=1, p_signal=0.9, user_label="Noise"),
+        charts.ProbEntry(index=2, p_signal=0.001, user_label="Noise"),
     ]
 
 
-def test_prob_strip_colors_rated_tick_by_human_label(
+def test_prob_strip_colors_tick_by_human_label(
     prob_entries: list[charts.ProbEntry],
 ) -> None:
     # Act
     svg = charts.prob_strip_svg(prob_entries, current_ic=1, threshold=0.05)
 
-    # Assert: the rated tick is tall (1.6 width) and uses the human label color
+    # Assert: the tick uses the human label color
     assert f'stroke="{charts.C_NOISE}" stroke-width="1.6"' in svg
 
 
@@ -196,11 +196,9 @@ def test_metric_glyph_emits_only_its_own_markup(cohort_frame: MetricFrame) -> No
 
 
 def test_prob_strip_ignores_an_unknown_label(tmp_path) -> None:
-    # Arrange: labels reach this function from FIX files and are used only as
-    # palette keys, never interpolated into the markup
-    entries = [
-        charts.ProbEntry(index=1, p_signal=0.5, fix_label="<script>", user_label=None)
-    ]
+    # Arrange: labels are used only as palette keys, never interpolated into
+    # the markup
+    entries = [charts.ProbEntry(index=1, p_signal=0.5, user_label="<script>")]
 
     # Act
     svg = charts.prob_strip_svg(entries, current_ic=1, threshold=0.05)

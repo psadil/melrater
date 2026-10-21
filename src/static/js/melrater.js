@@ -1,29 +1,11 @@
-// melrater — montage switchers, keyboard shortcuts, jump box, auto-advance.
-// State lives on the backend; this only toggles pre-rendered content, clicks
-// htmx-wired buttons, and keeps one per-browser preference in localStorage.
+// melrater — montage switchers, keyboard shortcuts, jump box.
+// State lives on the backend; this only toggles pre-rendered content and
+// clicks htmx-wired buttons.
+//
+// There is deliberately no auto-advance: rating reveals FIX's verdict on the
+// component just rated, and moving on the moment the rating landed would
+// navigate away from it before it could be read.
 (() => {
-  const AUTO_ADVANCE_KEY = "melrater:auto-advance";
-
-  const autoAdvanceOn = () => {
-    try {
-      return localStorage.getItem(AUTO_ADVANCE_KEY) === "1";
-    } catch {
-      return false;  // private mode, or site data blocked
-    }
-  };
-  const setAutoAdvance = (on) => {
-    try {
-      localStorage.setItem(AUTO_ADVANCE_KEY, on ? "1" : "0");
-    } catch { /* preference is a convenience, never a requirement */ }
-    syncAutoAdvance();
-  };
-  // the ratebar is replaced on every rating, so the checkbox has to be
-  // re-synced from the stored preference after each swap
-  const syncAutoAdvance = () => {
-    const box = document.querySelector("[data-auto-advance]");
-    if (box) box.checked = autoAdvanceOn();
-  };
-
   // Only the visible montage carries a src; the others wait here until first
   // shown, so a component page loads one image instead of twelve. The three
   // choices — axis, background, smoothing — are independent, so a swap of one
@@ -88,25 +70,11 @@
     if (bg) { showMontage({ ...current(), bg: bg.dataset.bgBtn }); return; }
     const sm = e.target.closest("[data-sm-btn]");
     if (sm) { showMontage({ ...current(), sm: sm.dataset.smBtn }); return; }
-    const box = e.target.closest("[data-auto-advance]");
-    if (box) setAutoAdvance(box.checked);
   });
 
-  const goNext = () => {
-    const bar = document.getElementById("ratebar");
-    const next = bar && bar.dataset.nextUrl;
-    if (next) window.location = next;
-  };
-
-  document.addEventListener("htmx:afterSwap", (e) => {
-    if (e.target.id !== "ratebar") return;
-    syncAutoAdvance();
-    if (autoAdvanceOn()) goNext();
-  });
-
-  // Text entry swallows the shortcuts; a focused checkbox must not — clicking
-  // the auto-advance box would otherwise silently disable the number keys
-  // until you clicked somewhere else.
+  // Text entry swallows the shortcuts; a focused checkbox or button must not —
+  // clicking one would otherwise silently disable the number keys until you
+  // clicked somewhere else.
   const TYPING_TYPES = ["checkbox", "radio", "button", "submit", "reset"];
   const isTyping = (el) =>
     el.tagName === "TEXTAREA" ||
@@ -141,7 +109,6 @@
     else if (e.key === "1" || e.key === "s") rate("Signal");
     else if (e.key === "2" || e.key === "u") rate("Unknown");
     else if (e.key === "3" || e.key === "n") rate("Noise");
-    else if (e.key === "a") setAutoAdvance(!autoAdvanceOn());
     // Cycle rather than toggle, and go through .click() rather than calling
     // showMontage: that one path fires both the visual swap and htmx's
     // preference POST, so the choice survives navigation.
@@ -182,6 +149,4 @@
       }
     });
   }
-
-  syncAutoAdvance();
 })();

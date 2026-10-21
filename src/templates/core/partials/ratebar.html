@@ -1,10 +1,10 @@
 {% load help_tags %}
-<div class="ratebar" id="ratebar"
-     {% if next_index %}data-next-url="{% url 'component-detail' run.pk next_index %}"{% endif %}>
+<div class="ratebar" id="ratebar">
   {% comment %}
     hx-include is inherited, so one attribute here covers all three buttons.
-    The rating POST carries the note so that auto-advance -- which navigates
-    the moment this bar swaps -- cannot race the textarea's own blur save.
+    The rating POST carries the note because the textarea's own blur save,
+    which clicking a button sets off, can reach the server before the first
+    rating does -- and a note has no row to land on until there is one.
   {% endcomment %}
   <div class="rate-buttons" hx-include="#note-text">
     {% for b in rating_buttons %}
@@ -18,8 +18,5 @@
     {% endfor %}
   </div>
   <span class="rate-guide">how to decide{% help_bubble "field.rating" %}</span>
-  <label class="autoadvance" title="after rating, go straight to the next component">
-    <input type="checkbox" data-auto-advance> auto-advance <kbd>a</kbd>
-  </label>
   <span class="progress">{{ n_rated }} / {{ n_total }} rated</span>
 </div>

@@ -3,7 +3,7 @@
 A web app for reviewing MELODIC ICA components, modeled on [fsleyes's melodic scene](https://open.oxcin.ox.ac.uk/pages/fsl/fsleyes/fsleyes/userdoc/ic_classification.html) with two additions:
 
 - **More context per component** — the framewise-displacement (motion) timecourse rendered time-aligned under the IC timecourse, captioned with how much of *this* component's timecourse head motion explains, and every pyFIX classifier metric shown against its distribution across every component of every scan (outliers surfaced first).
-- **Integrated multi-reviewer classification** — automated pyFIX verdicts are stored as reviewers (a model + threshold, e.g. `UKBiobank @ thr1`) alongside human reviewers.
+- **Integrated multi-reviewer classification** — automated pyFIX verdicts are stored as reviewers (a model + threshold, e.g. `UKBiobank @ thr1`) alongside human reviewers. A reviewer sees FIX's call on a component only once they have rated it themselves, so the classifier cannot anchor the human label.
 - **A place to argue about a component** — each one has a discussion thread, which opens to a reviewer once they have rated it, plus a private note that only its author ever sees.
 
 ## Setup
@@ -74,7 +74,7 @@ pixi run serve
 
 This collects static files and starts [granian](https://github.com/emmett-framework/granian) on <http://127.0.0.1:8000/>. The run list filters by subject, session, task or run, hides completed runs, and offers a resume link to the first component you have not rated.
 
-Keyboard shortcuts on a component page: `1`/`s`, `2`/`u`, `3`/`n` to rate, `←`/`→` to move between components, `g` to jump to one by number, `a` to toggle auto-advance, `o` to cycle the montage plane, `b` to swap the montage background, `m` to swap between the unsmoothed and the smoothed map, `d` to move between the rating and discussion tabs, and `c` to jump into whichever text box the tab has. The `?` beside the rating buttons is Griffanti et al.'s decision procedure — spatial map, then time series, then spectrum; keep what is not clearly noise — with the look-alikes to watch for.
+Keyboard shortcuts on a component page: `1`/`s`, `2`/`u`, `3`/`n` to rate, `←`/`→` to move between components, `g` to jump to one by number, `o` to cycle the montage plane, `b` to swap the montage background, `m` to swap between the unsmoothed and the smoothed map, `d` to move between the rating and discussion tabs, and `c` to jump into whichever text box the tab has. The `?` beside the rating buttons is Griffanti et al.'s decision procedure — spatial map, then time series, then spectrum; keep what is not clearly noise — with the look-alikes to watch for.
 
 On `m`: the smoothed map is per-component rescaled, so read cluster count, size and placement rather than absolute colour. It is the view for a network's shape, a vein along the sinus, CSF in the ventricles or a white-matter pattern; the unsmoothed map is the view for stripes, checkerboards, the mixed signs of a susceptibility artefact and where a peak actually sits.
 

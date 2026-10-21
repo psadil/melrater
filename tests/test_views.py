@@ -66,12 +66,63 @@ def test_component_detail_embeds_montage(logged_in, ingested_run: Run) -> None:
     )
 
 
-def test_component_detail_shows_fix_probability(logged_in, ingested_run: Run) -> None:
+#: The fixture's FIX reviewer. Unmistakable on the rating page: help.toml
+#: never names it, so its absence means the verdict card shipped nothing.
+FIX_REVIEWER = "TestModel @ thr5"
+
+
+def test_component_detail_hides_the_fix_verdict_until_you_rate(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert
+    assert FIX_REVIEWER not in response.content.decode()
+
+
+def test_component_detail_hides_the_probability_strip_until_you_rate(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert: the strip's threshold label, at the fixture's thr5
+    assert "thr 0.05" not in response.content.decode()
+
+
+def test_component_detail_shows_fix_probability_once_you_rate(
+    logged_in, ingested_run: Run
+) -> None:
+    # Arrange
+    logged_in.post(f"/runs/{ingested_run.pk}/ic/1/rate/", {"label": "Noise"})
+
     # Act
     response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
 
     # Assert
     assert "P(signal) = 0.9" in response.content.decode()
+
+
+def test_rating_reveals_the_fix_verdict(logged_in, ingested_run: Run) -> None:
+    # Act: the out-of-band verdict card in the rating response
+    response = logged_in.post(f"/runs/{ingested_run.pk}/ic/1/rate/", {"label": "Noise"})
+
+    # Assert
+    assert FIX_REVIEWER in response.content.decode()
+
+
+def test_rating_one_component_does_not_reveal_another(
+    logged_in, ingested_run: Run
+) -> None:
+    # Arrange
+    logged_in.post(f"/runs/{ingested_run.pk}/ic/1/rate/", {"label": "Noise"})
+
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/")
+
+    # Assert
+    assert FIX_REVIEWER not in response.content.decode()
 
 
 def test_component_detail_offers_axis_switcher(logged_in, ingested_run: Run) -> None:
@@ -235,7 +286,8 @@ def test_component_page_wires_the_note_into_the_rating_post(
     # Act
     response = logged_in.get(f"/runs/{ingested_run.pk}/ic/2/")
 
-    # Assert: without this the note would race auto-advance's navigation
+    # Assert: without this a note typed before the first rating is lost, since
+    # its blur save can reach the server before there is a rating to store on
     assert 'hx-include="#note-text"' in response.content.decode()
 
 

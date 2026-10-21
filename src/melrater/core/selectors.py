@@ -375,7 +375,51 @@ class FixVerdictRow:
     threshold: float | None  # decision threshold as a probability (thrN -> N/100)
 
 
-def fix_verdicts_for_component(component: Component) -> list[FixVerdictRow]:
+@dataclass(frozen=True)
+class FixReference:
+    """The FIX verdict card's whole state for one viewer on one component.
+
+    Everything stays empty until the viewer has rated this component
+    themselves: no label, no probability, no strip, not even whether the run
+    has a FIX classifier at all. A reviewer who has seen the classifier's
+    call is rating against it rather than looking at the component, and the
+    point of a human rating is that it is not FIX's. The gate lives here, as
+    `discussion_for_component`'s does, so the template only ever receives
+    what it may show.
+
+    `strip` holds only components the viewer has rated, for the same reason:
+    a faint tick for an unrated component still gives away where FIX put it,
+    and once one component is left unrated, which tick is which.
+    """
+
+    rated: bool
+    verdicts: list[FixVerdictRow]
+    strip: list[ProbEntry]
+    threshold: float | None  # the strip's classifier, as a probability
+
+
+def fix_reference_for_component(
+    component: Component, user_labels: dict[int, str]
+) -> FixReference:
+    """FIX's call on `component`, for a viewer whose labels are `user_labels`.
+
+    Takes the viewer's labels for the run rather than the viewer: the rating
+    page has already read them for its progress count and next-unrated link.
+    """
+    # The gate, and the whole of it: nothing below this line runs for a viewer
+    # who has not rated, so no FIX row is ever read on their behalf.
+    if component.index not in user_labels:
+        return FixReference(rated=False, verdicts=[], strip=[], threshold=None)
+    strip, threshold = _prob_entries(component.run, user_labels)
+    return FixReference(
+        rated=True,
+        verdicts=_fix_verdicts(component),
+        strip=strip,
+        threshold=threshold,
+    )
+
+
+def _fix_verdicts(component: Component) -> list[FixVerdictRow]:
     rows: list[FixVerdictRow] = []
     qs = (
         Classification.objects.filter(
@@ -518,12 +562,14 @@ def user_labels_for_run(run: Run, user: AbstractBaseUser) -> dict[int, str]:
     }
 
 
-def prob_entries_for_run(
+def _prob_entries(
     run: Run, user_labels: dict[int, str]
 ) -> tuple[list[ProbEntry], float | None]:
     """Ticks for the P(signal) strip from the run's primary FIX reviewer.
 
-    Returns ([] , None) when the run has no FIX classifications.
+    Only the components in `user_labels`: see `FixReference` for why the
+    rest are never read. Returns ([] , None) when the run has no FIX
+    classifications.
     """
     fix_reviewer = (
         Reviewer.objects.filter(
@@ -535,18 +581,15 @@ def prob_entries_for_run(
     if fix_reviewer is None:
         return [], None
     by_index = {
-        int(index): (float(prob) if prob is not None else 0.0, str(label))
-        for index, label, prob in Classification.objects.filter(
-            component__run=run, reviewer=fix_reviewer
-        ).values_list("component__index", "label", "probability")
+        int(index): float(prob) if prob is not None else 0.0
+        for index, prob in Classification.objects.filter(
+            component__run=run,
+            reviewer=fix_reviewer,
+            component__index__in=list(user_labels),
+        ).values_list("component__index", "probability")
     }
     entries = [
-        ProbEntry(
-            index=i,
-            p_signal=by_index[i][0],
-            fix_label=by_index[i][1],
-            user_label=user_labels.get(i),
-        )
+        ProbEntry(index=i, p_signal=by_index[i], user_label=user_labels[i])
         for i in sorted(by_index)
     ]
     thr = fix_reviewer.fix_threshold

@@ -280,22 +280,24 @@ def metric_glyph_svg(frame: MetricFrame) -> str:
 
 @dataclass(frozen=True)
 class ProbEntry:
-    """One component's tick on the P(signal) strip."""
+    """One rated component's tick on the P(signal) strip.
+
+    Rated only: the strip never carries a component the viewer has not judged
+    (selectors.FixReference), so there is no FIX label to fall back on here.
+    """
 
     index: int  # 1-based component index
     p_signal: float
-    fix_label: str
-    user_label: str | None
+    user_label: str
 
 
 def prob_strip_svg(
     entries: Sequence[ProbEntry], current_ic: int, threshold: float
 ) -> str:
-    """All components' P(signal) on a log axis with the decision threshold.
+    """Rated components' P(signal) on a log axis with the decision threshold.
 
-    Rated components get tall ticks colored by the human label — a color on
-    the "wrong" side of the threshold line marks a disagreement with FIX;
-    unrated ticks are short, faint, and FIX-colored.
+    Each tick is colored by the human label, so a color on the "wrong" side of
+    the threshold line marks a disagreement with FIX.
     """
     w, h = 340, 52
     x0, x1 = 16.0, w - 10.0
@@ -329,16 +331,11 @@ def prob_strip_svg(
         f'<text x="{tx + 3:.1f}" y="12" fill="{C_UNKNOWN}">thr {threshold:g}</text>'
     )
     for entry in entries:
-        fix_color = LABEL_COLORS.get(entry.fix_label, C_MUTED)
-        if entry.user_label is not None:
-            color = LABEL_COLORS.get(entry.user_label, C_MUTED)
-            opacity, y_lo, y_hi, sw = 0.95, 20, 40, 1.6
-        else:
-            color, opacity, y_lo, y_hi, sw = fix_color, 0.28, 25, 35, 1.2
+        color = LABEL_COLORS.get(entry.user_label, C_MUTED)
         parts.append(
-            f'<line x1="{px(entry.p_signal):.1f}" y1="{y_lo}" '
-            f'x2="{px(entry.p_signal):.1f}" y2="{y_hi}" '
-            f'stroke="{color}" stroke-width="{sw}" opacity="{opacity}"/>'
+            f'<line x1="{px(entry.p_signal):.1f}" y1="20" '
+            f'x2="{px(entry.p_signal):.1f}" y2="40" '
+            f'stroke="{color}" stroke-width="1.6" opacity="0.95"/>'
         )
     cur = next((e for e in entries if e.index == current_ic), None)
     if cur is not None:

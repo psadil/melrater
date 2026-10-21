@@ -2,22 +2,32 @@
 <div class="card" id="verdict-card"{% if oob %} hx-swap-oob="true"{% endif %}>
   <div class="card-title"><span class="card-title-text">FIX verdict
     {% help_bubble "field.fix_verdict" %}</span></div>
-  {% for v in fix_rows %}
-    <div class="verdict-row">
-      <span class="meta-chip">{{ v.reviewer }}</span>
-      <span class="verdict verdict-{{ v.label|lower }}">{{ v.label|upper }}</span>
-      {% if v.probability is not None %}
-        <span class="verdict-p">P(signal) = {{ v.probability_fmt }}
-          {% if v.threshold is not None %}<em>vs thr {{ v.threshold }}</em>{% endif %}
-          {% if forloop.first %}{% help_bubble "field.p_signal" %}{% endif %}</span>
-      {% endif %}
-    </div>
-  {% empty %}
-    <div class="muted">no FIX classifications for this run</div>
-  {% endfor %}
-  {% if prob_strip %}
-    {{ prob_strip|safe }}
-    <div class="strip-legend">tall tick = rated (color = human label) ·
-      faint tick = unrated (FIX label) · dot = this IC{% help_bubble "chart.prob_strip" %}</div>
+  {% if not fix.rated %}
+    {% comment %}
+      The whole gated branch, the {% empty %} line below included: the
+      selector returned nothing, so this reads the same whether or not the
+      run has a FIX classifier at all.
+    {% endcomment %}
+    <div class="muted">Rate this component and FIX's call appears here. Until
+      then it stays hidden, so the call you make is your own.</div>
+  {% else %}
+    {% for v in fix.verdicts %}
+      <div class="verdict-row">
+        <span class="meta-chip">{{ v.reviewer }}</span>
+        <span class="verdict verdict-{{ v.label|lower }}">{{ v.label|upper }}</span>
+        {% if v.probability is not None %}
+          <span class="verdict-p">P(signal) = {{ v.probability_fmt }}
+            {% if v.threshold is not None %}<em>vs thr {{ v.threshold }}</em>{% endif %}
+            {% if forloop.first %}{% help_bubble "field.p_signal" %}{% endif %}</span>
+        {% endif %}
+      </div>
+    {% empty %}
+      <div class="muted">no FIX classifications for this run</div>
+    {% endfor %}
+    {% if prob_strip %}
+      {{ prob_strip|safe }}
+      <div class="strip-legend">tick = a component you have rated (color = your
+        label) · dot = this IC{% help_bubble "chart.prob_strip" %}</div>
+    {% endif %}
   {% endif %}
 </div>

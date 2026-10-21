@@ -95,19 +95,32 @@ def test_component_page_loads_one_montage(
     assert len(requested) == 1
 
 
-def test_auto_advance_moves_to_the_next_component(
+def test_rating_reveals_the_fix_verdict_in_place(
     logged_in_page, live_server, ingested_run: Run
 ) -> None:
     # Arrange
     logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
-    logged_in_page.check("[data-auto-advance]")
+
+    # Act: the verdict card arrives out of band with the rating response
+    logged_in_page.keyboard.press("3")
+    logged_in_page.wait_for_selector("#verdict-card .verdict-row")
+
+    # Assert
+    expect(logged_in_page.locator("#verdict-card")).to_contain_text("TestModel @ thr5")
+
+
+def test_rating_stays_on_the_component(
+    logged_in_page, live_server, ingested_run: Run
+) -> None:
+    # Arrange
+    logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
 
     # Act
     logged_in_page.keyboard.press("3")
-    logged_in_page.wait_for_url("**/ic/2/")
+    logged_in_page.wait_for_selector("#verdict-card .verdict-row")
 
-    # Assert
-    assert logged_in_page.url.endswith("/ic/2/")
+    # Assert: still here, so the verdict just revealed can be read
+    assert logged_in_page.url.endswith("/ic/1/")
 
 
 # --- help bubbles -------------------------------------------------------
@@ -365,21 +378,20 @@ def test_the_frame_is_pinned_to_twice_the_voxel_grid(
 def test_a_note_typed_before_rating_rides_along_with_the_rating(
     logged_in_page, live_server, ingested_run: Run, user
 ) -> None:
-    """The note reaches the database even when auto-advance navigates away.
+    """A note typed before the first rating reaches the database.
 
     Deliberately on an unrated component: `fill` dispatches `change`, so the
     blur endpoint does fire, but with no rating yet it stores nothing by
     construction. The only path left is the note riding along with the rating
-    POST -- which is the path that has to win the race against auto-advance.
+    POST.
     """
     # Arrange
     logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
-    logged_in_page.check("[data-auto-advance]")
     logged_in_page.fill("#note-text", "quokka-on-a-bicycle")
 
     # Act
     logged_in_page.click("button.rate-noise")
-    logged_in_page.wait_for_url("**/ic/2/")
+    logged_in_page.wait_for_selector("button.rate-noise.selected")
 
     # Assert
     assert (

@@ -163,14 +163,15 @@ refs = ["salimi2014"]
 [chart.prob_strip]
 title = "P(signal) across the run"
 body = """
-Every component in the run placed on a log axis by the probability FIX gave \
-it, so you can see where this one sits among the rest."""
+Every component in the run that you have rated, placed on a log axis by the \
+probability FIX gave it, so you can see where this one sits among the rest \
+and where your calls and FIX's part ways. Components you have not rated yet \
+are left off, for the reason the verdict above is hidden until you rate."""
 bullets = [
   "dashed amber line: the threshold this classifier was run at",
-  "tall tick: a component you have already rated, coloured by your label",
-  "faint short tick: not yet rated, coloured by FIX's label",
+  "tick: a component you have rated, coloured by your label",
   "blue dot: the component you are looking at",
-  "a tall tick on the far side of the threshold from its colour is a disagreement with FIX",
+  "a tick on the far side of the threshold from its colour is a disagreement with FIX",
 ]
 
 
@@ -203,7 +204,7 @@ reasoning you want beside your own label when you come back to it. \
 Reasoning you want somebody else to read goes on the discussion tab, where \
 it can be answered."""
 bullets = [
-  "the note is saved when you click away from the box, and again with the label when you rate — so typing a note and then rating stores both, even with auto-advance on",
+  "the note is saved when you click away from the box, and again with the label when you rate — so typing a note and then rating stores both",
   "there is nowhere to keep a note before you rate, because it lives on the rating; until then the box says so",
   "press c to jump to the box, escape to leave it",
 ]
@@ -229,8 +230,15 @@ bullets = [
 title = "FIX verdict"
 body = """
 What the trained FIX classifier decided for this component, one row per \
-classifier and threshold applied to this run. It is shown for reference and \
-does not constrain your rating — disagreeing with it is the point of rating."""
+classifier and threshold applied to this run. It stays hidden until you have \
+rated the component yourself, and appears the moment you do: a call made \
+after seeing the classifier's is a call made against it, and the point of a \
+human rating is that it is not FIX's. Once shown it is a reference, not a \
+constraint — disagreeing with it is the point of rating."""
+bullets = [
+  "you can still change your rating after seeing it; what it is for is a second look where you and FIX part ways, not a correction",
+  "rating does not move you on to the next component, so the verdict is there to read; → or the next-unrated link moves on",
+]
 refs = ["salimi2014"]
 
 [field.p_signal]

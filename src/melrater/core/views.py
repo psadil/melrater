@@ -214,12 +214,12 @@ def _component_context(run: Run, component: Component, user: AbstractBaseUser) -
     n_total = len(indices)
     user_labels = selectors.user_labels_for_run(run, user)
     notes = selectors.notes_for_component(component, user)
-    prob_entries, threshold = selectors.prob_entries_for_run(run, user_labels)
+    fix = selectors.fix_reference_for_component(component, user_labels)
     prob_strip = (
         charts.prob_strip_svg(
-            prob_entries, index, threshold if threshold is not None else 0.01
+            fix.strip, index, fix.threshold if fix.threshold is not None else 0.01
         )
-        if prob_entries
+        if fix.strip
         else None
     )
     unrated_after = [i for i in indices if i not in user_labels and i != index]
@@ -238,7 +238,7 @@ def _component_context(run: Run, component: Component, user: AbstractBaseUser) -
         "background_buttons": selectors.background_buttons(run),
         "smoothings": list(run.montage_smoothings),
         "smoothing_buttons": selectors.smoothing_buttons(run),
-        "fix_rows": selectors.fix_verdicts_for_component(component),
+        "fix": fix,
         "prob_strip": prob_strip,
         "user_label": user_labels.get(index),
         "notes": notes,
@@ -389,10 +389,10 @@ def component_rate(request: HttpRequest, run_id: int, index: int) -> HttpRespons
 def component_note(request: HttpRequest, run_id: int, index: int) -> HttpResponse:
     """Save the note on its own, when the textarea loses focus.
 
-    Its own endpoint because auto-advance navigates the instant the ratebar
-    swaps, so a note must not depend on that request finishing; the rating
+    Its own endpoint so a note can be revised without re-rating. The rating
     POST carries the note too, which is what covers the reviewer who types and
-    then rates in one motion.
+    then rates in one motion: the blur save that click sets off can reach the
+    server before the rating does, and then has no row to land on.
 
     Answers with the status span alone: re-rendering the card would rebuild
     the whole component context -- charts, montage frames, the metric panel --

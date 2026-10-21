@@ -301,16 +301,6 @@ code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-siz
   font-size: 12px; white-space: nowrap;
 }
 
-/* auto-advance toggle in the rating bar */
-.autoadvance {
-  display: flex; gap: 5px; align-items: center; margin-left: 16px;
-  color: var(--muted); font-size: 12px; white-space: nowrap; cursor: pointer;
-}
-.autoadvance kbd {
-  font: 10px ui-monospace, monospace; background: #00000055;
-  border-radius: 3px; padding: 1px 4px; color: var(--muted);
-}
-
 /* --- help bubbles ---------------------------------------------------------
    A `?` and a native popover. `popovertarget` needs no JavaScript, and the
    top layer is the point: `.side` scrolls and `body` is overflow:hidden, so a
