@@ -145,6 +145,8 @@
     "other-tab": () => go("nav-tab-other"),
     "focus-text": () => focusFirst("note-text", "post-body"),
     "focus-jump": () => focusFirst("jump"),
+    // togglePopover leaves focus where it was, so the keys keep working
+    "key-sheet": () => document.getElementById("key-sheet")?.togglePopover?.(),
   };
 
   // Codes whose keydown this handler took. Their keyup is ours too: some
@@ -175,6 +177,13 @@
     taken.add(e.code);
     // a held 3 would POST again and again, a held Space run through the run
     if (e.repeat || leaving) return;
+    // With the sheet open, any other key just closes it: no rating while
+    // reading what the keys do.
+    const sheet = document.getElementById("key-sheet");
+    if (sheet?.matches(":popover-open") && action !== "key-sheet") {
+      sheet.hidePopover();
+      return;
+    }
     ACTIONS[action]?.(e);
   });
   document.addEventListener("keyup", (e) => {

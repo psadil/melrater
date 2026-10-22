@@ -340,11 +340,30 @@ code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-siz
 /* the family bubble sits in the details body, so it only shows once expanded */
 details > .help-btn { margin: 3px 0 5px; }
 
+/* The key sheet: `?`, or the topbar button. A help panel in look, but hung
+   from the topbar rather than the rating grid's corner — the discussion page
+   has no grid, and the topbar is the one thing every page with keys shares. */
+.key-sheet {
+  top: 46px; right: 14px; bottom: auto; width: 370px;
+  max-height: calc(100vh - 60px);  /* the whole list at once, not a help panel's 60vh */
+}
+.key-sheet b:not(:first-child) { margin-top: 9px; }
+.key-sheet table { border-collapse: collapse; width: 100%; }
+.key-sheet td { padding: 2px 8px 2px 0; vertical-align: top; }
+/* one width for every section's table, so the descriptions line up */
+.key-sheet-keys { width: 96px; white-space: nowrap; }
+.key-sheet kbd, .key-sheet-btn kbd {
+  font: 10px ui-monospace, monospace; background: #00000055;
+  border-radius: 3px; padding: 1px 4px; color: var(--muted);
+}
+.key-sheet kbd + kbd { margin-left: 4px; }
+.key-sheet-note { margin: 9px 0 0; color: var(--muted); font-size: 11px; }
+
 /* Popover is baseline in every browser this app targets, but if it is missing
    the panel would render inline as an ordinary div — hide the whole mechanism
    instead, and the metric rows' title= tooltips still carry the definitions. */
 @supports not selector(:popover-open) {
-  .help-btn, .help-pop { display: none; }
+  .help-btn, .help-pop, .key-sheet-btn { display: none; }
 }
 
 /* room for a `?` beside the things it explains */

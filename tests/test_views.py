@@ -1411,3 +1411,18 @@ def test_component_page_names_space_on_the_next_arrow(
 
     # Assert
     assert 'title="next component (Space / →)"' in response.content.decode()
+
+
+def test_component_page_lists_every_binding_in_the_key_sheet(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    body = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/").content.decode()
+    sheet = body[body.index('id="key-sheet"') :]
+
+    # Assert
+    assert [
+        b.action
+        for b in keys.on_page("rate")
+        if f'data-key-action="{b.action}"' not in sheet
+    ] == []

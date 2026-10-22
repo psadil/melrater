@@ -276,3 +276,42 @@ def test_holding_g_types_nothing_into_the_go_to_box(ic1: Page) -> None:
 
     # Assert
     assert ic1.input_value("#jump") == ""
+
+
+# --- the key sheet ----------------------------------------------------------
+
+
+def test_question_mark_opens_the_key_sheet(ic1: Page) -> None:
+    # Act
+    ic1.keyboard.press("Shift+Slash")
+
+    # Assert
+    expect(ic1.locator("#key-sheet")).to_be_visible()
+
+
+def test_escape_closes_the_key_sheet(ic1: Page) -> None:
+    # Arrange
+    ic1.keyboard.press("Shift+Slash")
+    expect(ic1.locator("#key-sheet")).to_be_visible()
+
+    # Act
+    ic1.keyboard.press("Escape")
+
+    # Assert
+    expect(ic1.locator("#key-sheet")).not_to_be_visible()
+
+
+def test_a_rating_key_with_the_sheet_open_only_closes_it(ic1: Page) -> None:
+    # Arrange
+    sent = record_posts(ic1)
+    ic1.keyboard.press("Shift+Slash")
+    expect(ic1.locator("#key-sheet")).to_be_visible()
+
+    # Act: 3 closes the sheet, and only the sentinel 3 after it rates
+    ic1.keyboard.press("Digit3")
+    expect(ic1.locator("#key-sheet")).not_to_be_visible()
+    ic1.keyboard.press("Digit3")
+    ic1.wait_for_selector("button.rate-noise.selected")
+
+    # Assert
+    assert len(sent) == 1

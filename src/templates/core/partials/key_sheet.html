@@ -1,4 +1,23 @@
 {% comment %}
-  The page's key map, from keys.py: melrater.js answers to exactly these keys
-  and no others. A page without this tag has no shortcuts at all.
-{% endcomment %}{{ keymap|json_script:"keymap" }}
+  The page's key map from keys.py, twice over: the sheet `?` opens, and the
+  data block melrater.js dispatches on -- it answers to exactly these keys and
+  no others. A page without this tag has no shortcuts at all.
+{% endcomment %}{% load key_tags %}<button class="nav-btn key-sheet-btn" type="button"
+  popovertarget="key-sheet">keys {% key_hint "key-sheet" %}</button>
+<div id="key-sheet" class="help-pop key-sheet" popover aria-label="keyboard shortcuts">
+  {% for group in groups %}
+    <b>{{ group.title }}</b>
+    <table>
+      {% for binding in group.bindings %}
+        <tr>
+          <td class="key-sheet-keys">{% for key in binding.keys %}<kbd data-key-action="{{ binding.action }}">{{ key.label }}</kbd>{% endfor %}</td>
+          <td>{{ binding.does }}</td>
+        </tr>
+      {% endfor %}
+    </table>
+  {% endfor %}
+  <p class="key-sheet-note">Keys go by position, so Caps Lock and your keyboard
+    layout do not change them. &#8679; is Shift, and goes back. Space always moves
+    on: press a focused button with Enter.</p>
+</div>
+{{ keymap|json_script:"keymap" }}

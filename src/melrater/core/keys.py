@@ -124,6 +124,7 @@ BINDINGS: tuple[Binding, ...] = (
         "focus-jump", (Key("KeyG", "G"),), "go to a component by number", "other", RATE
     ),
     Binding("leave-text", (Key("Escape", "Esc"),), "leave a text box", "other", BOTH),
+    Binding("key-sheet", (Key("?", "?"),), "show or hide this list", "other", BOTH),
 )
 
 
