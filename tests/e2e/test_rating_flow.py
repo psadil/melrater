@@ -209,7 +209,7 @@ def test_background_hotkey_swaps_the_montage(
     logged_in_anat_page.goto(f"{live_server.url}/runs/{anat_ingested_run.pk}/ic/1/")
 
     # Act
-    logged_in_anat_page.keyboard.press("b")
+    logged_in_anat_page.keyboard.press("KeyD")
 
     # Assert: expect() retries — the anatomical has no src until first shown
     expect(
@@ -226,7 +226,7 @@ def test_background_choice_persists_across_navigation(
     # preference POST exactly as clicking does
     logged_in_anat_page.goto(f"{live_server.url}/runs/{anat_ingested_run.pk}/ic/1/")
     with logged_in_anat_page.expect_response("**/prefs/background/"):
-        logged_in_anat_page.keyboard.press("b")
+        logged_in_anat_page.keyboard.press("KeyD")
 
     # Act
     logged_in_anat_page.keyboard.press("ArrowRight")
@@ -249,7 +249,7 @@ def test_background_hotkey_keeps_the_chosen_axis(
         logged_in_anat_page.click('[data-axis-btn="coronal"]')
 
     # Act: swapping the background must not throw the axis away
-    logged_in_anat_page.keyboard.press("b")
+    logged_in_anat_page.keyboard.press("KeyD")
 
     # Assert
     expect(
@@ -282,7 +282,7 @@ def test_smoothing_hotkey_swaps_the_montage(
     logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
 
     # Act
-    logged_in_page.keyboard.press("m")
+    logged_in_page.keyboard.press("KeyF")
 
     # Assert: expect() retries — the smoothed map has no src until first shown
     expect(
@@ -297,7 +297,7 @@ def test_smoothing_choice_persists_across_navigation(
     # preference POST exactly as clicking does
     logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
     with logged_in_page.expect_response("**/prefs/smoothing/"):
-        logged_in_page.keyboard.press("m")
+        logged_in_page.keyboard.press("KeyF")
 
     # Act
     logged_in_page.keyboard.press("ArrowRight")
@@ -317,10 +317,10 @@ def test_smoothing_hotkey_keeps_the_chosen_axis_and_background(
     with logged_in_anat_page.expect_response("**/prefs/axis/"):
         logged_in_anat_page.click('[data-axis-btn="coronal"]')
     with logged_in_anat_page.expect_response("**/prefs/background/"):
-        logged_in_anat_page.keyboard.press("b")
+        logged_in_anat_page.keyboard.press("KeyD")
 
     # Act: the three choices are independent
-    logged_in_anat_page.keyboard.press("m")
+    logged_in_anat_page.keyboard.press("KeyF")
 
     # Assert
     expect(
@@ -337,7 +337,7 @@ def test_axis_hotkey_cycles_the_plane(
     logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
 
     # Act: "change plane" is a first-class tip, so it has a key
-    logged_in_page.keyboard.press("o")
+    logged_in_page.keyboard.press("KeyS")
 
     # Assert: the coronal frame, labels included, is what shows
     expect(logged_in_page.locator('[data-axis-labels="coronal"]')).to_be_visible()
@@ -424,16 +424,16 @@ def test_blurring_the_note_box_saves_it(
 def test_typing_in_the_note_box_does_not_rate(
     logged_in_page, live_server, ingested_run: Run, user
 ) -> None:
-    """c focuses the box, and the rating hotkeys become ordinary letters in it."""
+    """C focuses the box, and every shortcut becomes ordinary text in it."""
     # Arrange
     logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
 
-    # Act: s and n would otherwise rate Signal and Noise
-    logged_in_page.keyboard.press("c")
-    logged_in_page.keyboard.type("sn")
+    # Act: 3 would rate Noise, Space move on, S and D change the view
+    logged_in_page.keyboard.press("KeyC")
+    logged_in_page.keyboard.type("3 sd")
 
-    # Assert: the letters landed in the box and rated nothing
+    # Assert: the keys landed in the box and rated nothing
     assert (
         logged_in_page.input_value("#note-text"),
         Classification.objects.filter(reviewer__user=user).exists(),
-    ) == ("sn", False)
+    ) == ("3 sd", False)

@@ -1,9 +1,10 @@
+import json
 import re
 
 import pytest
 from django.core.management import call_command
 
-from melrater.core import selectors, services
+from melrater.core import keys, selectors, services
 from melrater.core.models import Classification, DiscussionPost, Run
 
 pytestmark = pytest.mark.django_db
@@ -1345,3 +1346,68 @@ def test_every_signed_in_page_forbids_a_shared_cache(
     assert [
         p for p in paths if "private" not in logged_in.get(p)["Cache-Control"]
     ] == []
+
+
+# --- keyboard -------------------------------------------------------------
+
+
+def _keymap(body: str) -> dict[str, str]:
+    """The `#keymap` data block melrater.js dispatches on."""
+    found = re.search(
+        r'<script id="keymap" type="application/json">(.*?)</script>', body, re.DOTALL
+    )
+    return json.loads(found.group(1)) if found else {}
+
+
+def test_component_page_ships_the_rate_keymap(logged_in, ingested_run: Run) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert
+    assert _keymap(response.content.decode()) == keys.keymap("rate")
+
+
+def test_discussion_page_ships_no_rating_keys(logged_in, ingested_run: Run) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/discussion/")
+
+    # Assert
+    assert [
+        a for a in _keymap(response.content.decode()).values() if a.startswith("rate-")
+    ] == []
+
+
+def test_run_list_ships_no_keymap(logged_in, ingested_run: Run) -> None:
+    # Act
+    response = logged_in.get("/")
+
+    # Assert: no map, no shortcuts
+    assert 'id="keymap"' not in response.content.decode()
+
+
+def test_every_kbd_on_the_component_page_comes_from_the_key_map(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert: a hand-written <kbd> could advertise a key nothing answers to
+    assert re.findall(r"<kbd(?![^>]*data-key-action)", response.content.decode()) == []
+
+
+def test_rating_response_keeps_the_key_hints(logged_in, ingested_run: Run) -> None:
+    # Act: the ratebar is swapped whole on every rating
+    response = logged_in.post(f"/runs/{ingested_run.pk}/ic/1/rate/", {"label": "Noise"})
+
+    # Assert
+    assert 'data-key-action="rate-signal">1</kbd>' in response.content.decode()
+
+
+def test_component_page_names_space_on_the_next_arrow(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert
+    assert 'title="next component (Space / →)"' in response.content.decode()

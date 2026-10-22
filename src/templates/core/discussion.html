@@ -5,10 +5,10 @@
 {% block content %}
 <div class="discussion-page">
   <div class="toolbar">
-    {% if prev_index %}<a id="nav-prev" class="nav-btn" href="{% url 'component-discussion' run.pk prev_index %}">&#8592;</a>
+    {% if prev_index %}<a id="nav-prev" class="nav-btn" title="previous component ({% key_label 'prev' %})" href="{% url 'component-discussion' run.pk prev_index %}">&#8592;</a>
     {% else %}<span class="nav-btn disabled">&#8592;</span>{% endif %}
     <span class="pos">IC {{ component.index }} / {{ n_total }}</span>
-    {% if next_index %}<a id="nav-next" class="nav-btn" href="{% url 'component-discussion' run.pk next_index %}">&#8594;</a>
+    {% if next_index %}<a id="nav-next" class="nav-btn" title="next component ({% key_label 'next' %})" href="{% url 'component-discussion' run.pk next_index %}">&#8594;</a>
     {% else %}<span class="nav-btn disabled">&#8594;</span>{% endif %}
     {% include "core/partials/page_tabs.html" with tab="discussion" %}
     <span class="meta-chip">{{ run.label }}</span>

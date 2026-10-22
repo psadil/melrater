@@ -74,7 +74,10 @@ task's own env, where it wins.
   (marked `e2e`, excluded from the default run).
 - **Frontend** stays thin: state lives on the backend, interactions go
   through htmx (vendored in `src/static/vendor/`), and custom JS is limited
-  to keyboard shortcuts and toggling pre-rendered content.
+  to keyboard shortcuts and toggling pre-rendered content. Shortcuts are
+  defined once, in `melrater/core/keys.py`: the handler (through the page's
+  `#keymap` data block), the `<kbd>` hints and the `?` sheet all read it, and
+  `melrater.js` implements actions without ever naming a key.
 - **Migrations**: after `makemigrations`, convert the generated
   `dependencies`/`operations` lists to tuples (ruff's RUF012 is enforced
   everywhere, and tuples avoid ClassVar override conflicts).

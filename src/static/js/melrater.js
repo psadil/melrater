@@ -107,11 +107,24 @@
   };
   const rate = (label) =>
     document.querySelector(`#ratebar [data-rate="${label}"]`)?.click();
+  // Until the next page commits, this one is still live and still gets keys:
+  // a 1 pressed in that gap would rate the component being LEFT.
+  let leaving = false;
+  window.addEventListener("pageshow", (e) => { if (e.persisted) leaving = false; });
   // go() no-ops on a missing element, so a key whose target this page lacks
   // (the last component's "next", say) does nothing.
   const go = (id) => {
     const a = document.getElementById(id);
-    if (a && a.href) window.location = a.href;
+    if (!a?.href) return;
+    // Space also separates words: a reviewer still typing after focus left the
+    // composer would otherwise navigate away from an unposted draft.
+    const draft = document.getElementById("post-body");
+    if (draft?.value.trim()) {
+      draft.focus();
+      return;
+    }
+    leaving = true;
+    window.location = a.href;
   };
   // Re-queried rather than held: the note card is replaced out of band on
   // every rating. The first that exists wins — the private note on the rating
@@ -130,24 +143,42 @@
     "next": () => go("nav-next"),
     "prev": () => go("nav-prev"),
     "other-tab": () => go("nav-tab-other"),
-    // preventDefault, or the key that focused the box lands in it
-    "focus-text": (e) => { e.preventDefault(); focusFirst("note-text", "post-body"); },
-    "focus-jump": (e) => { e.preventDefault(); focusFirst("jump"); },
+    "focus-text": () => focusFirst("note-text", "post-body"),
+    "focus-jump": () => focusFirst("jump"),
   };
 
+  // Codes whose keydown this handler took. Their keyup is ours too: some
+  // engines press a focused button on Space's keyup whatever keydown did.
+  const taken = new Set();
+
   document.addEventListener("keydown", (e) => {
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.isComposing || e.metaKey || e.ctrlKey || e.altKey) return;
     const action = actionFor(e);
     if (!action) return;
-    // Before the isTyping bail, or it could never fire: escape is the way back
-    // out of a text box. For the note box blurring it is also what triggers
-    // htmx's save; for the discussion composer it is just the way out.
-    if (action === "leave-text") {
-      if (e.target.tagName === "TEXTAREA") e.target.blur();
+    if (isTyping(e.target)) {
+      // Escape is the way out of any text box. For the note box blurring is
+      // also what triggers htmx's save; the go-to box is emptied so it does
+      // not come back holding a half-typed number.
+      if (action === "leave-text") {
+        if (e.target.id === "jump") e.target.value = "";
+        e.target.blur();
+      } else if (e.repeat && taken.has(e.code)) {
+        e.preventDefault();  // a held C or G focuses its box once, types nothing
+      }
       return;
     }
-    if (isTyping(e.target)) return;
+    // not prevented: outside a text box Escape is the popovers' own close key
+    if (action === "leave-text") return;
+    // Space would scroll the last-clicked pane or press a focused button; any
+    // other key would land in the box it just focused
+    e.preventDefault();
+    taken.add(e.code);
+    // a held 3 would POST again and again, a held Space run through the run
+    if (e.repeat || leaving) return;
     ACTIONS[action]?.(e);
+  });
+  document.addEventListener("keyup", (e) => {
+    if (taken.delete(e.code)) e.preventDefault();
   });
 
   const jump = document.getElementById("jump");

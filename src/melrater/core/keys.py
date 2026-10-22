@@ -11,6 +11,16 @@ The one exception is a lone printable character such as `?`, matched on
 `KeyboardEvent.key`, because which physical key prints it depends on the
 layout. Code names are never one character long, so the two cannot collide.
 
+The layout is for a reviewer whose other hand is on the mouse. The left hand
+rests on the home row with S D F under it: the view keys, pressed most often.
+Space, under the thumb, moves on. Rating takes a reach to the number row past
+a Q W E R row left unbound on purpose, so a slip off a view key cannot rate --
+and a rating is not free to take back here, since it reveals FIX's verdict.
+Shift goes backwards wherever there is a backwards; elsewhere a Shifted key
+does nothing, so there are exactly three chords that rate. The letters the
+old layout used (u, n, o, b, m, d) are left unbound rather than aliased, so an
+old habit does nothing instead of something else.
+
 Django-free, like help.py, and checked once at import: a chord bound twice on
 one page is a startup error rather than a key that silently does one of two
 things.
@@ -64,28 +74,54 @@ class KeyGroup:
 
 
 BINDINGS: tuple[Binding, ...] = (
+    # commit: a deliberate reach to the number row, past the unbound Q W E R
+    Binding("rate-signal", (Key("Digit1", "1"),), "Signal", "rate", RATE),
+    Binding("rate-unknown", (Key("Digit2", "2"),), "Unknown", "rate", RATE),
+    Binding("rate-noise", (Key("Digit3", "3"),), "Noise", "rate", RATE),
+    # look: under the resting fingers, in the order the buttons sit on screen
     Binding(
-        "rate-signal", (Key("Digit1", "1"), Key("KeyS", "s")), "Signal", "rate", RATE
+        "cycle-plane",
+        (Key("KeyS", "S"), Key("Shift+KeyS", "⇧S")),
+        "cycle the plane: axial, coronal, sagittal",
+        "look",
+        RATE,
     ),
     Binding(
-        "rate-unknown", (Key("Digit2", "2"), Key("KeyU", "u")), "Unknown", "rate", RATE
+        "cycle-background",
+        (Key("KeyD", "D"), Key("Shift+KeyD", "⇧D")),
+        "swap functional ↔ anatomical",
+        "look",
+        RATE,
     ),
     Binding(
-        "rate-noise", (Key("Digit3", "3"), Key("KeyN", "n")), "Noise", "rate", RATE
+        "cycle-smoothing",
+        (Key("KeyF", "F"), Key("Shift+KeyF", "⇧F")),
+        "swap unsmoothed ↔ smoothed",
+        "look",
+        RATE,
     ),
-    Binding("cycle-plane", (Key("KeyO", "o"),), "cycle the plane", "look", RATE),
+    # move: the thumb
     Binding(
-        "cycle-background", (Key("KeyB", "b"),), "swap the background", "look", RATE
-    ),
-    Binding("cycle-smoothing", (Key("KeyM", "m"),), "swap the smoothing", "look", RATE),
-    Binding("next", (Key("ArrowRight", "→"),), "next component", "move", BOTH),
-    Binding("prev", (Key("ArrowLeft", "←"),), "previous component", "move", BOTH),
-    Binding("other-tab", (Key("KeyD", "d"),), "rate ↔ discussion", "move", BOTH),
-    Binding(
-        "focus-text", (Key("KeyC", "c"),), "write in this tab's box", "other", BOTH
+        "next",
+        (Key("Space", "Space"), Key("ArrowRight", "→")),
+        "next component",
+        "move",
+        BOTH,
     ),
     Binding(
-        "focus-jump", (Key("KeyG", "g"),), "go to a component by number", "other", RATE
+        "prev",
+        (Key("Shift+Space", "⇧Space"), Key("ArrowLeft", "←")),
+        "previous component",
+        "move",
+        BOTH,
+    ),
+    Binding("other-tab", (Key("KeyT", "T"),), "rate ↔ discussion tab", "move", BOTH),
+    # rare, so named for what they do rather than placed for speed
+    Binding(
+        "focus-text", (Key("KeyC", "C"),), "write in this tab's box", "other", BOTH
+    ),
+    Binding(
+        "focus-jump", (Key("KeyG", "G"),), "go to a component by number", "other", RATE
     ),
     Binding("leave-text", (Key("Escape", "Esc"),), "leave a text box", "other", BOTH),
 )

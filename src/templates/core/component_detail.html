@@ -9,13 +9,13 @@
 {% block content %}
 <div class="rating-page">
   <div class="toolbar">
-    {% if prev_index %}<a id="nav-prev" class="nav-btn" href="{% url 'component-detail' run.pk prev_index %}">&#8592;</a>
+    {% if prev_index %}<a id="nav-prev" class="nav-btn" title="previous component ({% key_label 'prev' %})" href="{% url 'component-detail' run.pk prev_index %}">&#8592;</a>
     {% else %}<span class="nav-btn disabled">&#8592;</span>{% endif %}
     <span class="pos">IC {{ component.index }} / {{ n_total }}</span>
-    {% if next_index %}<a id="nav-next" class="nav-btn" href="{% url 'component-detail' run.pk next_index %}">&#8594;</a>
+    {% if next_index %}<a id="nav-next" class="nav-btn" title="next component ({% key_label 'next' %})" href="{% url 'component-detail' run.pk next_index %}">&#8594;</a>
     {% else %}<span class="nav-btn disabled">&#8594;</span>{% endif %}
     {% include "core/partials/page_tabs.html" with tab="rate" %}
-    <input id="jump" class="jump" placeholder="go to&#8230;"
+    <input id="jump" class="jump" type="text" inputmode="numeric" autocomplete="off" placeholder="go to&#8230;"
            data-url-template="{% url 'component-detail' run.pk 999999 %}">
     {% if next_unrated %}
       <a class="nav-btn" href="{% url 'component-detail' run.pk next_unrated %}">next unrated &#8674;</a>

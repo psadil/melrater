@@ -31,11 +31,11 @@ def test_the_tab_opens_the_thread(rated_page, ingested_run: Run) -> None:
     expect(rated_page.locator("#post-body")).to_be_visible()
 
 
-def test_d_moves_between_the_two_tabs(rated_page, ingested_run: Run) -> None:
+def test_t_moves_between_the_two_tabs(rated_page, ingested_run: Run) -> None:
     # Act
-    rated_page.keyboard.press("d")
+    rated_page.keyboard.press("KeyT")
     rated_page.wait_for_url("**/ic/1/discussion/")
-    rated_page.keyboard.press("d")
+    rated_page.keyboard.press("KeyT")
     rated_page.wait_for_url(f"**/runs/{ingested_run.pk}/ic/1/")
 
     # Assert
@@ -83,15 +83,15 @@ def test_deleting_your_own_post_removes_its_row(
 def test_typing_in_the_composer_does_not_rate(
     rated_page, live_server, ingested_run: Run
 ) -> None:
-    # Arrange: c focuses the box on this page too
+    # Arrange: C focuses the box on this page too
     rated_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/discussion/")
 
-    # Act: s and n would otherwise be rating hotkeys
-    rated_page.keyboard.press("c")
-    rated_page.keyboard.type("sn")
+    # Act: Space and T would otherwise move to another page
+    rated_page.keyboard.press("KeyC")
+    rated_page.keyboard.type("3 t")
 
     # Assert
-    assert rated_page.input_value("#post-body") == "sn"
+    assert rated_page.input_value("#post-body") == "3 t"
 
 
 def test_saving_an_edit_replaces_that_row_alone(
@@ -112,3 +112,34 @@ def test_saving_an_edit_replaces_that_row_alone(
 
     # Assert
     assert DiscussionPost.objects.get().body == "second thought"
+
+
+def test_space_moves_to_the_next_discussion(
+    rated_page, live_server, ingested_run: Run
+) -> None:
+    # Arrange
+    rated_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/discussion/")
+
+    # Act
+    rated_page.keyboard.press("Space")
+    rated_page.wait_for_url("**/ic/2/discussion/")
+
+    # Assert
+    assert rated_page.url.endswith("/ic/2/discussion/")
+
+
+def test_space_with_an_unposted_draft_goes_back_to_it(
+    rated_page, live_server, ingested_run: Run
+) -> None:
+    """Space also separates words, so typing on after focus left the box is safe."""
+    # Arrange: a draft, and focus somewhere else
+    rated_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/discussion/")
+    rated_page.fill("#post-body", "half a thought")
+    rated_page.locator("#post-body").blur()
+
+    # Act
+    rated_page.keyboard.press("Space")
+    expect(rated_page.locator("#post-body")).to_be_focused()
+
+    # Assert: still here, draft and all
+    assert rated_page.url.endswith("/ic/1/discussion/")

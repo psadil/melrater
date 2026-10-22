@@ -69,9 +69,9 @@ bullets = [
   "the number in each panel is that panel's voxel slice index",
   "axial and coronal are neurological: the subject's left is on the left of the image",
   "sagittal panels put posterior on the left, anterior on the right",
-  "press o to cycle the plane: a real cluster follows the grey matter in every plane, the sagittal sinus shows best sagittally, the cerebral arteries axially, and a multiband artefact as stripes in the coronal or sagittal plane",
-  "press b to swap between the mean functional and the anatomical, on a run that has both: the functional for dropout, the brain edge and anything EPI-specific, the anatomical for grey matter, deep nuclei and the cerebellum",
-  "press m to swap between the unsmoothed map and a smoothed one: unsmoothed for stripes, checkerboards and where a peak sits, smoothed for the overall shape",
+  "press S to cycle the plane (shift+S goes back): a real cluster follows the grey matter in every plane, the sagittal sinus shows best sagittally, the cerebral arteries axially, and a multiband artefact as stripes in the coronal or sagittal plane",
+  "press D to swap between the mean functional and the anatomical, on a run that has both: the functional for dropout, the brain edge and anything EPI-specific, the anatomical for grey matter, deep nuclei and the cerebellum",
+  "press F to swap between the unsmoothed map and a smoothed one: unsmoothed for stripes, checkerboards and where a peak sits, smoothed for the overall shape",
 ]
 refs = ["gofigure", "griffanti2017"]
 
@@ -89,7 +89,7 @@ bullets = [
   "smoothed is where a network's shape, a vein running along the sinus, CSF pulsation in the ventricles, or a subependymal-vein pattern spreading into white matter is easiest to see",
   "unsmoothed is where a multiband checkerboard, alternating positive and negative stripes, the tightly mixed signs of a susceptibility artefact, and the exact voxel a peak sits in are visible; smoothing hides all four",
   "a map that smooths to almost nothing had no coherent structure to begin with",
-  "press m to swap; the choice is kept across components",
+  "press F to swap; the choice is kept across components",
 ]
 refs = ["griffanti2017"]
 
@@ -104,8 +104,8 @@ bullets = [
   "that registration is a linear (affine) fit, and nothing here models EPI susceptibility distortion, so orbitofrontal, temporal-pole and sinus-adjacent voxels can be several millimetres out",
   "judge a component that hugs the brain edge, a sinus or a ventricle on the functional background, which has the true EPI geometry",
   "the slice numbers are the functional volume's own indices, so they mean the same thing on both backgrounds",
-  "the smoothed map (m) is easiest to read here: whether a large cluster follows the grey matter, or sits in white matter, CSF or a vessel",
-  "press b to swap backgrounds",
+  "the smoothed map (F) is easiest to read here: whether a large cluster follows the grey matter, or sits in white matter, CSF or a vessel",
+  "press D to swap backgrounds",
 ]
 refs = ["jenkinson2002", "jezzard1995"]
 
@@ -206,7 +206,7 @@ it can be answered."""
 bullets = [
   "the note is saved when you click away from the box, and again with the label when you rate — so typing a note and then rating stores both",
   "there is nowhere to keep a note before you rate, because it lives on the rating; until then the box says so",
-  "press c to jump to the box, escape to leave it",
+  "press C to jump to the box, Esc to leave it",
 ]
 
 [field.discussion]
@@ -223,7 +223,7 @@ bullets = [
   "you can edit or delete your own posts and nobody else's",
   "worth saying: what made the call hard, a look-alike you ruled out, or another component in the run that belongs with this one",
   "for something only you will read, use the note box on the rating tab",
-  "press d to move between the two tabs, c to jump to the box, escape to leave it",
+  "press T to move between the two tabs, C to jump to the box, Esc to leave it",
 ]
 
 [field.fix_verdict]
@@ -237,7 +237,7 @@ human rating is that it is not FIX's. Once shown it is a reference, not a \
 constraint — disagreeing with it is the point of rating."""
 bullets = [
   "you can still change your rating after seeing it; what it is for is a second look where you and FIX part ways, not a correction",
-  "rating does not move you on to the next component, so the verdict is there to read; → or the next-unrated link moves on",
+  "rating does not move you on to the next component, so the verdict is there to read; Space (or →) or the next-unrated link moves on",
 ]
 refs = ["salimi2014"]
 
