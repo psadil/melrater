@@ -105,16 +105,22 @@
   </div>
 
   <div class="side">
-    {% include "core/partials/verdict_card.html" %}
-    {% include "core/partials/note_card.html" %}
+    {% comment %}
+      The two charts lead, so a 720px-tall laptop window shows the spectrum
+      without scrolling. The verdict follows straight after: until you rate it
+      is only a placeholder, and once you do its row still lands above the
+      fold. The note comes after both; C focuses it, which scrolls it in.
+    {% endcomment %}
     <div class="card">
       <div class="card-title"><span class="card-title-text">timecourse + motion
         {% help_bubble "chart.timecourse_fd" %}</span></div>{{ tc_fd_svg|safe }}
     </div>
-    <div class="card">
+    <div class="card" id="spectrum-card">
       <div class="card-title"><span class="card-title-text">spectrum
         {% help_bubble "chart.spectrum" %}</span></div>{{ spectrum_svg|safe }}
     </div>
+    {% include "core/partials/verdict_card.html" %}
+    {% include "core/partials/note_card.html" %}
     <div class="card metrics-card" id="metrics">
       <div class="card-title"><span class="card-title-text">FIX metrics
         {% help_bubble "chart.metric_glyph" %}</span>

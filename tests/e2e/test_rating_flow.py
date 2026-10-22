@@ -123,6 +123,56 @@ def test_rating_stays_on_the_component(
     assert logged_in_page.url.endswith("/ic/1/")
 
 
+# --- side column on a laptop --------------------------------------------
+
+#: body's min-width, and the window a 13-inch laptop leaves under the
+#: browser's own chrome. The side column scrolls, so the charts a reviewer
+#: rates from have to be in its first screenful.
+LAPTOP = {"width": 1280, "height": 720}
+
+
+def test_spectrum_is_in_view_without_scrolling(
+    logged_in_page, live_server, ingested_run: Run
+) -> None:
+    # Arrange
+    logged_in_page.set_viewport_size(LAPTOP)
+
+    # Act
+    logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert: whole, not just its title — .side clips what is below its fold
+    expect(logged_in_page.locator("#spectrum-card")).to_be_in_viewport(ratio=1)
+
+
+def test_revealing_the_verdict_leaves_the_spectrum_in_view(
+    logged_in_page, live_server, ingested_run: Run
+) -> None:
+    # Arrange: the verdict card grows by the P(signal) strip when it opens
+    logged_in_page.set_viewport_size(LAPTOP)
+    logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
+
+    # Act
+    logged_in_page.keyboard.press("3")
+    logged_in_page.wait_for_selector("#verdict-card .verdict-row")
+
+    # Assert
+    expect(logged_in_page.locator("#spectrum-card")).to_be_in_viewport(ratio=1)
+
+
+def test_note_hotkey_scrolls_the_note_into_view(
+    logged_in_page, live_server, ingested_run: Run
+) -> None:
+    # Arrange: the note sits below the charts, under the fold at this size
+    logged_in_page.set_viewport_size(LAPTOP)
+    logged_in_page.goto(f"{live_server.url}/runs/{ingested_run.pk}/ic/1/")
+
+    # Act
+    logged_in_page.keyboard.press("KeyC")
+
+    # Assert
+    expect(logged_in_page.locator("#note-text")).to_be_in_viewport(ratio=1)
+
+
 # --- help bubbles -------------------------------------------------------
 
 
