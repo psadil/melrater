@@ -26,10 +26,11 @@ from melrater.core.models import Component, DiscussionPost, Run
 from melrater.core.montage import AXES, BACKGROUNDS, SMOOTHINGS
 from melrater.core.schemas import CohortData, ComponentData, RunData
 
+# the action names the key, in keys.py; a typo here fails at render
 RATING_BUTTONS = [
-    {"label": "Signal", "keys": ["1", "s"]},
-    {"label": "Unknown", "keys": ["2", "u"]},
-    {"label": "Noise", "keys": ["3", "n"]},
+    {"label": "Signal", "action": "rate-signal"},
+    {"label": "Unknown", "action": "rate-unknown"},
+    {"label": "Noise", "action": "rate-noise"},
 ]
 
 AXIS_SESSION_KEY = "montage_axis"

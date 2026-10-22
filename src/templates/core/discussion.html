@@ -1,5 +1,7 @@
 {% extends "base.html" %}
+{% load key_tags %}
 {% block title %}{{ run.label }} · IC {{ component.index }} · discussion{% endblock %}
+{% block key_sheet %}{% key_sheet "discussion" %}{% endblock %}
 {% block content %}
 <div class="discussion-page">
   <div class="toolbar">

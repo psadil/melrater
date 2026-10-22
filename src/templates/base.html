@@ -13,14 +13,15 @@
   <header class="topbar">
     <a class="brand" href="{% url 'run-list' %}">melrater</a>
     {% block topbar %}{% endblock %}
-    <span class="topbar-right">
+    <div class="topbar-right">
+      {% block key_sheet %}{% endblock %}
       {% if user.is_authenticated %}
         <span class="meta-chip">{{ user.get_username }}</span>
         <form method="post" action="{% url 'logout' %}">{% csrf_token %}
           <button class="nav-btn" type="submit">log out</button>
         </form>
       {% endif %}
-    </span>
+    </div>
   </header>
   {% block content %}{% endblock %}
 </body>

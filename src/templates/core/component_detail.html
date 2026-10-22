@@ -1,10 +1,11 @@
 {% extends "base.html" %}
-{% load help_tags %}
+{% load help_tags key_tags %}
 {% block title %}{{ run.label }} · IC {{ component.index }}{% endblock %}
 {% block head_extra %}
   {# warm the next component's montage while this one is being judged #}
   {% if prefetch_url %}<link rel="prefetch" as="image" href="{{ prefetch_url }}">{% endif %}
 {% endblock %}
+{% block key_sheet %}{% key_sheet "rate" %}{% endblock %}
 {% block content %}
 <div class="rating-page">
   <div class="toolbar">
@@ -39,14 +40,14 @@
         <button class="axis-btn{% if axis == active_axis %} active{% endif %}" data-axis-btn="{{ axis }}"
                 hx-post="{% url 'set-axis' %}" hx-vals='{"axis": "{{ axis }}"}' hx-swap="none">{{ axis }}</button>
       {% endfor %}
-      <kbd class="btn-key">o</kbd>
+      {% key_hint "cycle-plane" "btn-key" %}
       {% if background_buttons|length > 1 %}
         <span class="btn-sep"></span>
         {% for bg in background_buttons %}
           <button class="bg-btn{% if bg.key == active_background %} active{% endif %}" data-bg-btn="{{ bg.key }}"
                   hx-post="{% url 'set-background' %}" hx-vals='{"background": "{{ bg.key }}"}' hx-swap="none">{{ bg.label }}</button>
         {% endfor %}
-        <kbd class="btn-key">b</kbd>
+        {% key_hint "cycle-background" "btn-key" %}
       {% endif %}
       {% if smoothing_buttons|length > 1 %}
         <span class="btn-sep"></span>
@@ -54,7 +55,7 @@
           <button class="sm-btn{% if sm.key == active_smoothing %} active{% endif %}" data-sm-btn="{{ sm.key }}"
                   hx-post="{% url 'set-smoothing' %}" hx-vals='{"smoothing": "{{ sm.key }}"}' hx-swap="none">{{ sm.label }}</button>
         {% endfor %}
-        <kbd class="btn-key">m</kbd>
+        {% key_hint "cycle-smoothing" "btn-key" %}
       {% endif %}
     </div>
     {% comment %}

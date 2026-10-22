@@ -81,62 +81,73 @@
     el.isContentEditable ||
     (el.tagName === "INPUT" && !TYPING_TYPES.includes(el.type));
 
-  const cycle = (selector) => {
+  // Which key does what is keys.py's business, rendered into the page by
+  // {% key_sheet %} beside the hints it also draws; this file implements the
+  // actions and never names a key. No map (run list, login): no shortcuts.
+  const mapEl = document.getElementById("keymap");
+  const KEYMAP = mapEl ? JSON.parse(mapEl.textContent) : {};
+
+  // Physical keys: e.code ignores Caps Lock and the layout. A lone character
+  // ("?") is the exception, matched on e.key, since which key prints it
+  // depends on the layout. Code names are never one character, so the two
+  // cannot collide — and the length test keeps Shift+ArrowRight from falling
+  // back to ArrowRight.
+  const actionFor = (e) =>
+    KEYMAP[(e.shiftKey ? "Shift+" : "") + e.code] ??
+    (e.key.length === 1 ? KEYMAP[e.key] : undefined);
+
+  // Cycle rather than toggle, and go through .click() rather than calling
+  // showMontage: that one path fires both the visual swap and htmx's
+  // preference POST, so the choice survives navigation.
+  const cycle = (selector, step) => {
     const btns = [...document.querySelectorAll(selector)];
-    if (btns.length > 1) {
-      const at = btns.findIndex((b) => b.classList.contains("active"));
-      btns[(at + 1) % btns.length].click();
-    }
+    if (btns.length < 2) return;
+    const at = Math.max(0, btns.findIndex((b) => b.classList.contains("active")));
+    btns[(at + step + btns.length) % btns.length].click();
+  };
+  const rate = (label) =>
+    document.querySelector(`#ratebar [data-rate="${label}"]`)?.click();
+  // go() no-ops on a missing element, so a key whose target this page lacks
+  // (the last component's "next", say) does nothing.
+  const go = (id) => {
+    const a = document.getElementById(id);
+    if (a && a.href) window.location = a.href;
+  };
+  // Re-queried rather than held: the note card is replaced out of band on
+  // every rating. The first that exists wins — the private note on the rating
+  // tab, the composer on the discussion tab.
+  const focusFirst = (...ids) =>
+    ids.map((id) => document.getElementById(id)).find(Boolean)?.focus();
+  const step = (e) => (e.shiftKey ? -1 : 1);
+
+  const ACTIONS = {
+    "rate-signal": () => rate("Signal"),
+    "rate-unknown": () => rate("Unknown"),
+    "rate-noise": () => rate("Noise"),
+    "cycle-plane": (e) => cycle("[data-axis-btn]", step(e)),
+    "cycle-background": (e) => cycle("[data-bg-btn]", step(e)),
+    "cycle-smoothing": (e) => cycle("[data-sm-btn]", step(e)),
+    "next": () => go("nav-next"),
+    "prev": () => go("nav-prev"),
+    "other-tab": () => go("nav-tab-other"),
+    // preventDefault, or the key that focused the box lands in it
+    "focus-text": (e) => { e.preventDefault(); focusFirst("note-text", "post-body"); },
+    "focus-jump": (e) => { e.preventDefault(); focusFirst("jump"); },
   };
 
   document.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const action = actionFor(e);
+    if (!action) return;
     // Before the isTyping bail, or it could never fire: escape is the way back
     // out of a text box. For the note box blurring it is also what triggers
     // htmx's save; for the discussion composer it is just the way out.
-    if (e.key === "Escape" && e.target.tagName === "TEXTAREA") {
-      e.target.blur();
+    if (action === "leave-text") {
+      if (e.target.tagName === "TEXTAREA") e.target.blur();
       return;
     }
-    if (isTyping(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
-    const rate = (label) =>
-      document.querySelector(`#ratebar [data-rate="${label}"]`)?.click();
-    const go = (id) => {
-      const a = document.getElementById(id);
-      if (a && a.href) window.location = a.href;
-    };
-    if (e.key === "ArrowRight") go("nav-next");
-    else if (e.key === "ArrowLeft") go("nav-prev");
-    else if (e.key === "1" || e.key === "s") rate("Signal");
-    else if (e.key === "2" || e.key === "u") rate("Unknown");
-    else if (e.key === "3" || e.key === "n") rate("Noise");
-    // Cycle rather than toggle, and go through .click() rather than calling
-    // showMontage: that one path fires both the visual swap and htmx's
-    // preference POST, so the choice survives navigation.
-    else if (e.key === "b") cycle("[data-bg-btn]");
-    else if (e.key === "m") cycle("[data-sm-btn]");
-    else if (e.key === "o") cycle("[data-axis-btn]");
-    // Both re-query the element rather than holding a reference: the note card
-    // is replaced out of band on every rating.
-    else if (e.key === "g") {
-      const jump = document.getElementById("jump");
-      if (jump) {
-        jump.focus();
-        e.preventDefault();
-      }
-    } else if (e.key === "c") {
-      // Whichever box this page has: the private note on the rating tab, the
-      // composer on the discussion tab.
-      const box = document.getElementById("note-text") ||
-        document.getElementById("post-body");
-      if (box) {
-        box.focus();
-        e.preventDefault();  // or the c lands in the box
-      }
-    } else if (e.key === "d") {
-      // The other tab, whichever one this is. go() no-ops on a missing
-      // element, so d is inert on the run list.
-      go("nav-tab-other");
-    }
+    if (isTyping(e.target)) return;
+    ACTIONS[action]?.(e);
   });
 
   const jump = document.getElementById("jump");

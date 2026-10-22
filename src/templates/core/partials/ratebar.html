@@ -1,4 +1,4 @@
-{% load help_tags %}
+{% load help_tags key_tags %}
 <div class="ratebar" id="ratebar">
   {% comment %}
     hx-include is inherited, so one attribute here covers all three buttons.
@@ -13,7 +13,7 @@
               hx-post="{% url 'component-rate' run.pk component.index %}"
               hx-vals='{"label": "{{ b.label }}"}'
               hx-target="#ratebar" hx-swap="outerHTML">
-        {{ b.label }}{% for k in b.keys %} <kbd>{{ k }}</kbd>{% endfor %}
+        {{ b.label }} {% key_hint b.action %}
       </button>
     {% endfor %}
   </div>
