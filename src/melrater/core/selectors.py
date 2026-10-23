@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import array
 import io
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -228,6 +229,47 @@ def metric_raw_values(*, chunk_size: int = 2000) -> MetricSweep:
 
 
 @dataclass(frozen=True)
+class PushSweep:
+    """Every stored FIX contribution, pooled by model and then by feature."""
+
+    values: dict[str, dict[str, np.ndarray]]
+    n_components: int  # (component, model) pairs that contributed
+
+
+def fix_contribution_values(*, chunk_size: int = 2000) -> PushSweep:
+    """Read every FIX row's contributions, for a cohort rebuild.
+
+    Streamed into float32 buffers for the reason `metric_raw_values` is. Pooled
+    by model rather than by reviewer: a contribution depends on the model
+    alone, so two thresholds of one model are two reviewers holding the same
+    numbers, and each component counts once per model whichever it came from.
+    """
+    pooled: dict[str, dict[str, array.array[float]]] = {}
+    seen: set[tuple[int, str]] = set()
+    rows = Classification.objects.filter(
+        reviewer__kind=Reviewer.Kind.FIX, contributions__isnull=False
+    ).values_list("component_id", "reviewer__fix_model", "contributions")
+    for component_id, model, contributions in rows.iterator(chunk_size=chunk_size):
+        key = (int(component_id), str(model))
+        if key in seen:
+            continue
+        seen.add(key)
+        by_name = pooled.setdefault(str(model), {})
+        for name, value in contributions.items():
+            by_name.setdefault(name, array.array("f")).append(value)
+    return PushSweep(
+        values={
+            model: {
+                name: np.frombuffer(buffer, dtype=np.float32)
+                for name, buffer in by_name.items()
+            }
+            for model, by_name in pooled.items()
+        },
+        n_components=len(seen),
+    )
+
+
+@dataclass(frozen=True)
 class RunProgress:
     run: Run
     n_components: int
@@ -375,17 +417,54 @@ class FixVerdictRow:
     threshold: float | None  # decision threshold as a probability (thrN -> N/100)
 
 
+#: How many of FIX's reasons the verdict card lists, largest push first. The
+#: rest are summed into one line: across the a2cps runs the eight largest
+#: carry about 60% of everything a component's features pushed.
+REASONS_SHOWN = 8
+
+
+@dataclass(frozen=True)
+class ReasonRow:
+    """One feature's contribution to FIX's call."""
+
+    name: str
+    push: float  # log-odds; positive pushes toward Signal, negative toward Noise
+
+
+@dataclass(frozen=True)
+class FixReasons:
+    """Why the run's primary FIX reviewer made its call on one component.
+
+    Additive in log-odds: `baseline`, then every row, then `rest_push`, lands
+    on the log-odds of `probability` (fixmodel checks that before storing).
+    """
+
+    reviewer: str
+    model: str  # what the cohort's push bands are keyed by
+    threshold: float | None  # the decision threshold, as a probability
+    probability: float | None
+    baseline: float  # log-odds before any feature: the model's training average
+    rows: list[ReasonRow]  # the REASONS_SHOWN largest pushes, largest first
+    rest_push: float  # every other feature's push, summed
+    n_rest: int
+
+    @property
+    def logit(self) -> float:
+        return self.baseline + math.fsum(r.push for r in self.rows) + self.rest_push
+
+
 @dataclass(frozen=True)
 class FixReference:
     """The FIX verdict card's whole state for one viewer on one component.
 
     Everything stays empty until the viewer has rated this component
-    themselves: no label, no probability, no strip, not even whether the run
-    has a FIX classifier at all. A reviewer who has seen the classifier's
-    call is rating against it rather than looking at the component, and the
-    point of a human rating is that it is not FIX's. The gate lives here, as
-    `discussion_for_component`'s does, so the template only ever receives
-    what it may show.
+    themselves: no label, no probability, no strip, no reasons, not even
+    whether the run has a FIX classifier at all. A reviewer who has seen the
+    classifier's call is rating against it rather than looking at the
+    component, and the point of a human rating is that it is not FIX's. The
+    reasons are the call in another form -- they add up to it -- so they wait
+    behind the same gate. The gate lives here, as `discussion_for_component`'s
+    does, so the template only ever receives what it may show.
 
     `strip` holds only components the viewer has rated, for the same reason:
     a faint tick for an unrated component still gives away where FIX put it,
@@ -396,6 +475,9 @@ class FixReference:
     verdicts: list[FixVerdictRow]
     strip: list[ProbEntry]
     threshold: float | None  # the strip's classifier, as a probability
+    #: None for an unrated viewer, and for a FIX row stored without reasons
+    #: (ingested before they existed, or with its model out of reach).
+    reasons: FixReasons | None = None
 
 
 def fix_reference_for_component(
@@ -411,36 +493,67 @@ def fix_reference_for_component(
     if component.index not in user_labels:
         return FixReference(rated=False, verdicts=[], strip=[], threshold=None)
     strip, threshold = _prob_entries(component.run, user_labels)
+    fix_rows = _fix_classifications(component)
     return FixReference(
         rated=True,
-        verdicts=_fix_verdicts(component),
+        verdicts=[_fix_verdict(cls) for cls in fix_rows],
         strip=strip,
         threshold=threshold,
+        # the first by name, which is the reviewer the strip is drawn from
+        reasons=_fix_reasons(fix_rows[0]) if fix_rows else None,
     )
 
 
-def _fix_verdicts(component: Component) -> list[FixVerdictRow]:
-    rows: list[FixVerdictRow] = []
-    qs = (
+def _fix_classifications(component: Component) -> list[Classification]:
+    return list(
         Classification.objects.filter(
             component=component, reviewer__kind=Reviewer.Kind.FIX
         )
         .select_related("reviewer")
         .order_by("reviewer__name")
     )
-    for cls in qs:
-        thr = cls.reviewer.fix_threshold
-        prob = cls.probability
-        rows.append(
-            FixVerdictRow(
-                reviewer=str(cls.reviewer.name),
-                label=str(cls.label),
-                probability=prob,
-                probability_fmt=f"{prob:.3g}" if prob is not None else "",
-                threshold=(thr / 100.0) if thr is not None else None,
-            )
-        )
-    return rows
+
+
+def _fix_threshold(reviewer: Reviewer) -> float | None:
+    """A reviewer's thrN as the probability it stands for (N/100)."""
+    thr = reviewer.fix_threshold
+    return (thr / 100.0) if thr is not None else None
+
+
+def _fix_verdict(cls: Classification) -> FixVerdictRow:
+    prob = cls.probability
+    return FixVerdictRow(
+        reviewer=str(cls.reviewer.name),
+        label=str(cls.label),
+        probability=prob,
+        probability_fmt=f"{prob:.3g}" if prob is not None else "",
+        threshold=_fix_threshold(cls.reviewer),
+    )
+
+
+def _fix_reasons(cls: Classification) -> FixReasons | None:
+    """The reasons stored on one FIX row, largest push first."""
+    contributions = cls.contributions
+    if contributions is None or cls.baseline is None:
+        return None
+    ranked = sorted(
+        (
+            ReasonRow(name=str(name), push=float(push))
+            for name, push in contributions.items()
+        ),
+        key=lambda row: (-abs(row.push), row.name),
+    )
+    shown, rest = ranked[:REASONS_SHOWN], ranked[REASONS_SHOWN:]
+    return FixReasons(
+        reviewer=str(cls.reviewer.name),
+        model=str(cls.reviewer.fix_model),
+        threshold=_fix_threshold(cls.reviewer),
+        probability=cls.probability,
+        baseline=float(cls.baseline),
+        rows=shown,
+        rest_push=math.fsum(row.push for row in rest),
+        n_rest=len(rest),
+    )
 
 
 @dataclass(frozen=True)
@@ -592,8 +705,7 @@ def _prob_entries(
         ProbEntry(index=i, p_signal=by_index[i], user_label=user_labels[i])
         for i in sorted(by_index)
     ]
-    thr = fix_reviewer.fix_threshold
-    return entries, (thr / 100.0) if thr is not None else None
+    return entries, _fix_threshold(fix_reviewer)
 
 
 def montage_url(
@@ -761,7 +873,12 @@ def _fix_payloads(run: Run) -> list[FixReviewerPayload]:
             raise ValueError(f"unknown classification label: {label!r}")
         reviewers.setdefault(row.reviewer.pk, row.reviewer)
         by_reviewer.setdefault(row.reviewer.pk, []).append(
-            FixVerdictPayload(label=label, probability=row.probability)
+            FixVerdictPayload(
+                label=label,
+                probability=row.probability,
+                baseline=row.baseline,
+                contributions=row.contributions,
+            )
         )
     return [
         FixReviewerPayload(

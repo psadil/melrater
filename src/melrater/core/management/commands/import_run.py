@@ -17,6 +17,13 @@ normal case is one command rather than two. A failed push is counted
 separately from a failed ingest: a dropped connection an hour in should read
 as "these runs are here but not there yet, run push_runs", not as an ingest
 that went wrong.
+
+`--fix-models` (or MELRATER_FIX_MODELS) is pyFIX's directory of trained models,
+which is what FIX's reasons for each call are computed from (fixmodel). It is
+required: nothing adds reasons to a run after it has been ingested, short of
+re-running a one-off migration by hand while the run's files still exist. A
+run whose model is not in the directory, or whose reasons do not add up to
+FIX's own probabilities, still ingests, and the summary says which.
 """
 
 import os
@@ -30,7 +37,7 @@ import typer
 from django.core.management.base import CommandError
 from django_typer.management import TyperCommand
 
-from melrater.core import lake, melodic, push, selectors, services
+from melrater.core import fixmodel, lake, melodic, push, selectors, services
 from melrater.core.models import Run
 
 
@@ -96,8 +103,16 @@ class Command(TyperCommand):
             str,
             typer.Option(help="Name of an environment variable holding the password."),
         ] = "MELRATER_PUSH_PASSWORD",
+        fix_models: t.Annotated[
+            str,
+            typer.Option(
+                help="pyFIX's trained-model directory (its resources/models), "
+                "which FIX's per-feature reasons are computed from."
+            ),
+        ] = os.environ.get("MELRATER_FIX_MODELS", ""),
     ) -> None:
         """Ingest every MELODIC+pyFIX run a bidslake catalog knows about."""
+        shelf = None if dry_run else self._shelf(fix_models)
         lk = lake.open_catalog(catalog, base_dir=base_dir)
         discovered = lake.discover_runs(lk, sub=sub, ses=ses, task=task, run=run)
         if not discovered:
@@ -109,6 +124,7 @@ class Command(TyperCommand):
         total = len(discovered)
         failures: list[Failure] = []
         not_pushed: list[Failure] = []
+        unexplained: list[Failure] = []
         n_ingested = 0
         n_skipped = 0
         started = time.monotonic()
@@ -136,9 +152,13 @@ class Command(TyperCommand):
 
             run_started = time.monotonic()
             try:
-                ingested = services.ingest_run(
-                    source=melodic.load_run(found.inputs), image_workers=workers
+                assert (
+                    shelf is not None
+                )  # only a dry run has none, and it stopped above
+                source, problems = fixmodel.explain_source(
+                    melodic.load_run(found.inputs), shelf
                 )
+                ingested = services.ingest_run(source=source, image_workers=workers)
             # broad on purpose: one bad run must not end a batch of hundreds
             except Exception as exc:
                 failures.append(Failure(found.label, f"{type(exc).__name__}: {exc}"))
@@ -150,6 +170,11 @@ class Command(TyperCommand):
                 continue
 
             n_ingested += 1
+            for problem in problems:
+                unexplained.append(Failure(found.label, problem))
+                self.stderr.write(
+                    self.style.WARNING(f"{prefix} no FIX reasons: {problem}")
+                )
             elapsed = time.monotonic() - run_started
             self.stdout.write(
                 self.style.SUCCESS(
@@ -167,8 +192,25 @@ class Command(TyperCommand):
             n_skipped=n_skipped,
             failures=failures,
             not_pushed=not_pushed,
+            unexplained=unexplained,
             dry_run=dry_run,
         )
+
+    def _shelf(self, fix_models: str) -> fixmodel.ModelShelf:
+        """The models FIX's reasons come from, refused up front when missing.
+
+        Refused rather than warned about: a campaign ingested without them has
+        no reasons on any run, and finding that out afterwards is too late.
+        """
+        if not fix_models:
+            raise typer.BadParameter(
+                "--fix-models (or MELRATER_FIX_MODELS) must name pyFIX's model "
+                "directory, e.g. <env>/lib/python3.*/site-packages/pyfix/resources/models"
+            )
+        directory = Path(fix_models).expanduser()
+        if not directory.is_dir():
+            raise typer.BadParameter(f"--fix-models: {directory} is not a directory")
+        return fixmodel.ModelShelf(directory)
 
     def _target(self, server: str, user: str, password_env: str) -> push.PushTarget:
         if not user:
@@ -215,6 +257,7 @@ class Command(TyperCommand):
         n_skipped: int,
         failures: list[Failure],
         not_pushed: list[Failure],
+        unexplained: list[Failure],
         dry_run: bool,
     ) -> None:
         verb = "would ingest" if dry_run else "ingested"
@@ -233,6 +276,18 @@ class Command(TyperCommand):
             )
         for failure in failures:
             self.stderr.write(self.style.ERROR(f"  {failure.label}: {failure.reason}"))
+        if unexplained:
+            self.stdout.write("")
+            self.stdout.write(
+                self.style.WARNING(
+                    f"{len(unexplained)} FIX result(s) ingested without reasons; "
+                    "their verdict cards will show none:"
+                )
+            )
+            for failure in unexplained:
+                self.stderr.write(
+                    self.style.WARNING(f"  {failure.label}: {failure.reason}")
+                )
         if not_pushed:
             self.stdout.write("")
             self.stdout.write(

@@ -215,6 +215,24 @@ img[data-bg-img="func"] { image-rendering: pixelated; }
 }
 .strip-legend { color: var(--muted); font-size: 11px; margin-top: 4px; }
 
+/* FIX's reasons, under the verdict: a metric row with a second strip. Two
+   strips and a number have to share the 400px column with the name, so the
+   glyphs run narrower than the metric panel's and a long name is cut short
+   (its title= carries the full name, the value and the push). */
+.fix-reasons { margin-top: 8px; }
+.reasons-head { display: flex; gap: 6px; align-items: center; }
+.reasons-summary { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+.reason-row, .reason-cols {
+  display: grid; grid-template-columns: minmax(0, 1fr) 98px 98px 38px;
+  gap: 6px; align-items: center; padding: 1px 0;
+}
+.reason-row .metric-name { font-size: 11px; }
+.reason-row .glyph { width: 98px; height: 15px; }
+.reason-cols { color: var(--muted); font-size: 11px; }
+.reason-push { text-align: right; font-size: 11px; font-variant-numeric: tabular-nums; }
+.reason-constant { color: var(--muted); font-size: 11px; line-height: 15px; }
+.reason-rest .metric-name { color: var(--muted); }
+
 /* metrics panel */
 .metric-row { display: flex; align-items: center; gap: 8px; padding: 1px 0; }
 .metric-name {

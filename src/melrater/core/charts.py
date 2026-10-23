@@ -14,8 +14,10 @@ import numpy as np
 
 from melrater.core.melodic import FRISTON_K
 from melrater.core.metrics import OUTLIER_Z, MetricFrame
+from melrater.core.schemas import PushNorm
 
 METRIC_CLIP = 6.0  # display clip for metric z-scores
+PUSH_CLIP = 3.0  # display clip for one feature's push on FIX, in log-odds
 FD_REFS = (0.2, 0.5)  # mm reference lines
 PROB_FLOOR_EXP = -5.0  # left edge of the log P(signal) axis
 R2_METER_W = 52.0  # width of the motion-R^2 meter on the FD panel
@@ -223,7 +225,7 @@ def spectrum_svg(
 
 
 def metric_glyph_svg(frame: MetricFrame) -> str:
-    """Dot-on-distribution strip for one metric: bands, Signal ticks, this IC.
+    """Dot-on-distribution strip for one metric: bands, this run's rail, this IC.
 
     The bands are whichever distribution the frame chose — the cohort when
     melrater has one, this scan's own components otherwise — and the rail
@@ -264,15 +266,69 @@ def metric_glyph_svg(frame: MetricFrame) -> str:
     parts.append(
         f'<line x1="{zx(0):.1f}" y1="6" x2="{zx(0):.1f}" y2="24" stroke="#4a5261"/>'
     )
-    for s in frame.signal_z:
-        sx = zx(float(s))
-        parts.append(
-            f'<line x1="{sx:.1f}" y1="8" x2="{sx:.1f}" y2="22" '
-            f'stroke="{C_SIGNAL}" stroke-width="1.4" opacity="0.85"/>'
-        )
     parts.append(
         f'<circle cx="{zx(frame.z):.1f}" cy="15" r="4.2" '
         f'fill="{severity_color(frame.z)}" stroke="{C_BG}" stroke-width="1.2"/>'
+    )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def push_color(push: float) -> str:
+    """Green for a push toward Signal, red toward Noise, grey for none."""
+    if push > 0:
+        return C_SIGNAL
+    if push < 0:
+        return C_NOISE
+    return C_MUTED
+
+
+def push_glyph_svg(push: float, norm: PushNorm | None) -> str:
+    """One feature's push on FIX's log-odds, against the pushes it gave the study.
+
+    The metric strip's grammar on a log-odds axis centred on zero, where zero
+    is no push either way. The bands are the pushes this feature gave every
+    component the same model explained, across the cohort. A band sitting
+    wholly to one side is a lean the model has for the whole study, and a bar
+    inside it is FIX treating this component as it treats all of them. The
+    bar runs from zero to this component's push, green toward Signal and red
+    toward Noise. There are no bands until a cohort holds this model's reasons.
+    """
+    w, h = 170, 26
+    x0, x1 = 6.0, 164.0
+
+    def px(value: float) -> float:
+        clipped = max(-PUSH_CLIP, min(PUSH_CLIP, value))
+        return x0 + (clipped + PUSH_CLIP) / (2 * PUSH_CLIP) * (x1 - x0)
+
+    color = push_color(push)
+    parts = [
+        (
+            f'<svg viewBox="0 0 {w} {h}" xmlns="http://www.w3.org/2000/svg" '
+            f'class="glyph push-glyph">'
+        )
+    ]
+    if norm is not None:
+        parts.append(
+            f'<rect x="{px(norm.p5):.1f}" y="11" '
+            f'width="{px(norm.p95) - px(norm.p5):.1f}" height="8" rx="2" '
+            f'fill="#2a3140"/>'
+        )
+        parts.append(
+            f'<rect x="{px(norm.p25):.1f}" y="9" '
+            f'width="{px(norm.p75) - px(norm.p25):.1f}" height="12" rx="2" '
+            f'fill="#39424f"/>'
+        )
+    parts.append(
+        f'<line x1="{px(0):.1f}" y1="6" x2="{px(0):.1f}" y2="24" stroke="#4a5261"/>'
+    )
+    parts.append(
+        f'<line x1="{px(0):.1f}" y1="15" x2="{px(push):.1f}" y2="15" '
+        f'stroke="{color}" stroke-width="3"/>'
+    )
+    parts.append(
+        f'<circle cx="{px(push):.1f}" cy="15" r="4.2" fill="{color}" '
+        f'stroke="{C_BG}" stroke-width="1.2"/>'
     )
     parts.append("</svg>")
     return "".join(parts)

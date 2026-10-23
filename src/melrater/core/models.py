@@ -183,6 +183,14 @@ class MetricCohort(models.Model):
     norms = models.JSONField(
         help_text="Per-metric cohort centre, scale and percentile bands"
     )
+    # The same pooling for FIX's reasons: per model, how far each feature
+    # moved its log-odds across every component it explained. What the
+    # verdict card's push strips are read against, so a push FIX gives
+    # nearly every component in the study is visibly one.
+    fix_norms = models.JSONField(
+        default=dict,
+        help_text="Per-model, per-feature percentile bands of FIX's contributions",
+    )
     computed_at = models.DateTimeField(auto_now=True)
 
     objects: ClassVar[MetricCohortManager] = MetricCohortManager()
@@ -270,6 +278,21 @@ class Classification(models.Model):
     note = models.TextField(blank=True, default="")
     probability = models.FloatField(
         null=True, blank=True, help_text="FIX P(signal), when the reviewer is FIX"
+    )
+    # Why FIX made this call (fixmodel): its log-odds before any feature, and
+    # each feature's exact TreeSHAP contribution on top of that, which together
+    # add up to the log-odds of `probability`. Beside the probability, for the
+    # reason `note` is beside the label. Null on every human row, and on a FIX
+    # row whose model was not available to explain it.
+    baseline = models.FloatField(
+        null=True,
+        blank=True,
+        help_text="FIX's log-odds before any feature (its training average)",
+    )
+    contributions = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="FIX's log-odds contribution per feature, when the reviewer is FIX",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -29,5 +29,6 @@
       <div class="strip-legend">tick = a component you have rated (color = your
         label) · dot = this IC{% help_bubble "chart.prob_strip" %}</div>
     {% endif %}
+    {% if fix_reasons %}{% include "core/partials/fix_reasons.html" %}{% endif %}
   {% endif %}
 </div>

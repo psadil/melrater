@@ -52,3 +52,18 @@ def logged_in_anat_page(page, live_server, anat_ingested_run, user):
     page.click('button[type="submit"]')
     page.wait_for_url(f"{live_server.url}/")
     return page
+
+
+@pytest.fixture
+def logged_in_explained_page(page, live_server, explained_ingested_run, user):
+    """`logged_in_page` for a run whose FIX verdicts carry their reasons.
+
+    Its own fixture because the explained run is the shared fixture directory
+    classified by a model, so it cannot be ingested beside `ingested_run`.
+    """
+    page.goto(f"{live_server.url}/accounts/login/")
+    page.fill('input[name="username"]', "rater")
+    page.fill('input[name="password"]', "pw")
+    page.click('button[type="submit"]')
+    page.wait_for_url(f"{live_server.url}/")
+    return page

@@ -42,6 +42,11 @@ class MetricStat(BaseModel):
     are measured against, and they are the way back out of them: a cohort
     z-score is a different scale over the same raw values, so without these a
     band could only ever be drawn in the frame it was computed in.
+
+    Runs ingested before the reveal gate also stored ``signal_z``, the
+    positions of the components FIX called Signal. Pydantic ignores it on
+    read, and nothing re-serialised through this model carries it: a dot that
+    sat on a Signal tick in every row was FIX's verdict, shown before rating.
     """
 
     median: float
@@ -50,7 +55,6 @@ class MetricStat(BaseModel):
     p25: float
     p75: float
     p95: float
-    signal_z: list[float]  # z of the FIX-labeled Signal components
 
 
 class MetricStats(BaseModel):
@@ -64,10 +68,9 @@ class MetricStats(BaseModel):
 class MetricNorm(BaseModel):
     """One metric's distribution across every component melrater holds.
 
-    Same shape as :class:`MetricStat` minus the Signal ticks, which are a
-    property of one scan's classifier run and mean nothing pooled. The
-    percentiles are in this norm's own z units; ``median`` and ``scale`` are
-    raw, and are what a stored raw value is scored against.
+    Same shape as :class:`MetricStat`. The percentiles are in this norm's own
+    z units; ``median`` and ``scale`` are raw, and are what a stored raw value
+    is scored against.
     """
 
     median: float
@@ -79,6 +82,21 @@ class MetricNorm(BaseModel):
     n: int  # components that contributed a value
 
 
+class PushNorm(BaseModel):
+    """How far one feature moved one FIX model's log-odds, across the cohort.
+
+    Plain log-odds, not z units: a contribution already has a scale that
+    means something, and zero -- no push either way -- is the point every
+    strip is read from.
+    """
+
+    p5: float
+    p25: float
+    p75: float
+    p95: float
+    n: int  # components whose contribution was pooled
+
+
 class CohortData(BaseModel):
     """Typed projection of the MetricCohort row."""
 
@@ -88,6 +106,9 @@ class CohortData(BaseModel):
     n_components: int
     computed_at: datetime
     norms: dict[str, MetricNorm]
+    #: model name -> feature -> spread of that feature's contributions. Empty
+    #: until a cohort has been built from FIX rows that carry contributions.
+    fix_norms: dict[str, dict[str, PushNorm]] = {}
 
 
 class RunData(BaseModel):
@@ -131,6 +152,13 @@ class FixVerdictPayload(BaseModel):
 
     label: Literal["Signal", "Noise", "Unknown"]
     probability: float | None = None
+    #: Why FIX made this call (fixmodel.FixContributions): the log-odds before
+    #: any feature, and each feature's contribution on top. Defaulted, for the
+    #: reason `motion_r2` is: a run ingested before they existed, or whose model
+    #: was not at hand, has none to send. The server checks that they add up to
+    #: `probability` before it stores them.
+    baseline: float | None = None
+    contributions: dict[str, float] | None = None
 
 
 class FixReviewerPayload(BaseModel):

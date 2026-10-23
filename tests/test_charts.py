@@ -3,6 +3,7 @@ import pytest
 
 from melrater.core import charts
 from melrater.core.metrics import MetricFrame, ScanRange
+from melrater.core.schemas import PushNorm
 
 #: Long enough that the Friston-24 chance level is a fraction rather than
 #: saturated, so the meter's tick lands somewhere meaningful: 24/199 = 0.12.
@@ -80,7 +81,6 @@ def scan_frame() -> MetricFrame:
         p25=-0.5,
         p75=0.5,
         p95=1.0,
-        signal_z=[0.2],
         scan_range=None,
     )
 
@@ -96,7 +96,6 @@ def cohort_frame() -> MetricFrame:
         p25=-0.7,
         p75=0.7,
         p95=2.0,
-        signal_z=[0.2],
         scan_range=ScanRange(p25=0.4, p75=1.6, median=1.0),
     )
 
@@ -109,12 +108,15 @@ def test_metric_glyph_colors_outlier_dot_red(scan_frame: MetricFrame) -> None:
     assert f'fill="{charts.C_SEV_BAD}"' in svg
 
 
-def test_metric_glyph_draws_signal_ticks(scan_frame: MetricFrame) -> None:
+def test_metric_glyph_draws_nothing_in_fixs_signal_colour(
+    scan_frame: MetricFrame,
+) -> None:
     # Act
     svg = charts.metric_glyph_svg(scan_frame)
 
-    # Assert
-    assert f'stroke="{charts.C_SIGNAL}"' in svg
+    # Assert: the strips used to tick FIX's Signal components, this one among
+    # them, which gave FIX's call away before rating
+    assert charts.C_SIGNAL not in svg
 
 
 def test_metric_glyph_draws_no_scan_rail_in_the_scan_frame(
@@ -205,3 +207,59 @@ def test_prob_strip_ignores_an_unknown_label(tmp_path) -> None:
 
     # Assert
     assert "<script>" not in svg
+
+
+# --- the push strip ---------------------------------------------------------
+
+#: Pushes this feature gave the cohort: a symmetric spread around no push.
+PUSH_NORM = PushNorm(p5=-1.0, p25=-0.5, p75=0.5, p95=1.0, n=100)
+
+
+def test_push_glyph_draws_a_push_toward_signal_green() -> None:
+    # Act
+    svg = charts.push_glyph_svg(1.2, PUSH_NORM)
+
+    # Assert
+    assert f'fill="{charts.C_SIGNAL}"' in svg
+
+
+def test_push_glyph_draws_a_push_toward_noise_red() -> None:
+    # Act
+    svg = charts.push_glyph_svg(-1.2, PUSH_NORM)
+
+    # Assert
+    assert f'fill="{charts.C_NOISE}"' in svg
+
+
+def test_push_glyph_draws_the_cohorts_bands() -> None:
+    # Act
+    svg = charts.push_glyph_svg(0.4, PUSH_NORM)
+
+    # Assert: 5th-95th and 25th-75th
+    assert svg.count("<rect") == 2
+
+
+def test_push_glyph_draws_no_bands_before_a_cohort() -> None:
+    # Act
+    svg = charts.push_glyph_svg(0.4, None)
+
+    # Assert
+    assert "<rect" not in svg
+
+
+def test_push_glyph_clips_a_push_beyond_the_axis() -> None:
+    # Act: ten log-odds is far past PUSH_CLIP
+    svg = charts.push_glyph_svg(10.0, None)
+
+    # Assert: the dot sits on the strip's right edge
+    assert '<circle cx="164.0"' in svg
+
+
+def test_push_glyph_emits_only_its_own_markup() -> None:
+    # Arrange: rendered with |safe, like the metric glyph, from floats alone
+    svg = charts.push_glyph_svg(-0.7, PUSH_NORM)
+
+    # Assert
+    assert svg.count("<") == svg.count("<svg") + svg.count("<rect") + svg.count(
+        "<line"
+    ) + svg.count("<circle") + svg.count("</svg")

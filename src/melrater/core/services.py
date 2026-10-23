@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import shutil
 import tempfile
 from collections.abc import Iterator
@@ -17,7 +18,7 @@ from django.contrib.auth.models import AbstractBaseUser
 from django.db import transaction
 from django.utils import timezone
 
-from melrater.core import lake, melodic, metrics, montage, transfer
+from melrater.core import fixmodel, lake, melodic, metrics, montage, transfer
 from melrater.core import storage as montage_store
 from melrater.core.models import (
     Classification,
@@ -27,7 +28,13 @@ from melrater.core.models import (
     Reviewer,
     Run,
 )
-from melrater.core.schemas import FixReviewerPayload, MetricNorm, RunPayload
+from melrater.core.schemas import (
+    FixReviewerPayload,
+    FixVerdictPayload,
+    MetricNorm,
+    PushNorm,
+    RunPayload,
+)
 
 logger = logging.getLogger("melrater.ingest")
 
@@ -247,16 +254,6 @@ def ingest_run(*, source: melodic.MelodicSource, image_workers: int = 0) -> Run:
         raise RunAlreadyIngested(str(path))
     table = metrics.build_metric_table(source.feature_names, source.features)
 
-    # the (alphabetically) first FIX result defines the Signal ticks shown on
-    # the metric glyphs; all FIX results are stored as reviewers below
-    signal_rows: list[int] = []
-    if source.fix_results:
-        signal_rows = [
-            i
-            for i, verdict in enumerate(source.fix_results[0].verdicts)
-            if verdict.label == "Signal"
-        ]
-
     run_uuid = uuid4()
     with _staged_render(
         ic_path=source.ic_path,
@@ -284,9 +281,7 @@ def ingest_run(*, source: melodic.MelodicSource, image_workers: int = 0) -> Run:
                 n_timepoints=source.n_timepoints,
                 fd=[float(v) for v in source.fd],
                 frequencies=[float(v) for v in source.frequencies],
-                metric_stats=metrics.compute_metric_stats(
-                    table, signal_rows
-                ).model_dump(),
+                metric_stats=metrics.compute_metric_stats(table).model_dump(),
                 montage_format=montage_format(),
                 montage_digest=digest,
                 montage_backgrounds=list(backgrounds),
@@ -313,14 +308,21 @@ def ingest_run(*, source: melodic.MelodicSource, image_workers: int = 0) -> Run:
             )
             for result in source.fix_results:
                 reviewer = _fix_reviewer(result)
+                explained = result.contributions
                 Classification.objects.bulk_create(
                     Classification(
                         component=component,
                         reviewer=reviewer,
                         label=verdict.label,
                         probability=verdict.p_signal,
+                        baseline=explained.baseline if explained else None,
+                        contributions=(
+                            explained.contributions[i] if explained else None
+                        ),
                     )
-                    for component, verdict in zip(components, result.verdicts)
+                    for i, (component, verdict) in enumerate(
+                        zip(components, result.verdicts, strict=True)
+                    )
                 )
     except Exception:
         # the rows are gone, so the montages are unreachable; drop them rather
@@ -379,7 +381,11 @@ _MONTAGE_FIELDS = (
 
 
 def store_metric_cohort(
-    *, norms: dict[str, MetricNorm], n_runs: int, n_components: int
+    *,
+    norms: dict[str, MetricNorm],
+    n_runs: int,
+    n_components: int,
+    fix_norms: dict[str, dict[str, PushNorm]] | None = None,
 ) -> MetricCohort:
     """Replace the stored cohort with a freshly computed one.
 
@@ -387,6 +393,9 @@ def store_metric_cohort(
     strip is drawn against, and there is no moment at which it should be
     missing. A rebuild that never finishes leaves the previous cohort in
     place, which is stale but still a cohort.
+
+    `fix_norms` is replaced along with everything else, so a rebuild over
+    rows with no contributions at all stores none rather than keeping old ones.
     """
     cohort, _ = MetricCohort.objects.update_or_create(
         key=MetricCohort.KEY,
@@ -394,6 +403,10 @@ def store_metric_cohort(
             "n_runs": n_runs,
             "n_components": n_components,
             "norms": {name: norm.model_dump() for name, norm in norms.items()},
+            "fix_norms": {
+                model: {name: norm.model_dump() for name, norm in by_name.items()}
+                for model, by_name in (fix_norms or {}).items()
+            },
         },
     )
     return cohort
@@ -601,6 +614,8 @@ def create_pushed_run(*, payload: RunPayload) -> Run:
                     reviewer=reviewer,
                     label=verdict.label,
                     probability=verdict.probability,
+                    baseline=verdict.baseline,
+                    contributions=verdict.contributions,
                 )
                 for component, verdict in zip(components, fix.verdicts)
             )
@@ -664,11 +679,13 @@ def check_pushed_run(*, run: Run | None, payload: RunPayload) -> None:
         if not picks or any(i < 0 for i in picks):
             raise PushRejected(f"slice picks for {axis} must be non-negative indices")
     for fix in payload.fix:
+        name = melodic.fix_reviewer_name(fix.model, fix.threshold)
         if len(fix.verdicts) != n_components:
             raise PushRejected(
-                f"{melodic.fix_reviewer_name(fix.model, fix.threshold)} has "
-                f"{len(fix.verdicts)} verdicts for {n_components} components"
+                f"{name} has {len(fix.verdicts)} verdicts for {n_components} components"
             )
+        for index, verdict in enumerate(fix.verdicts, start=1):
+            _check_contributions(f"{name}, component {index}", verdict)
         _reject_reviewer_name_clash(fix)
     if run is None:
         return
@@ -678,6 +695,43 @@ def check_pushed_run(*, run: Run | None, payload: RunPayload) -> None:
             f"{run.label} has {stored} components here and {n_components} were "
             "pushed; delete the run on this server first"
         )
+
+
+#: Well over the 186 columns of a pyFIX feature table, so a verdict carrying
+#: more is a malformed payload rather than a bigger model.
+MAX_CONTRIBUTIONS = 512
+
+
+def _check_contributions(where: str, verdict: FixVerdictPayload) -> None:
+    """Refuse reasons that do not explain the verdict they travel with.
+
+    The sum is the check: a component's contributions, on top of the
+    baseline, have to come back to the probability beside them. That cannot
+    show the split between features to be the model's, but it does stop a
+    payload stored under one call from describing a different one.
+    """
+    if verdict.baseline is None and verdict.contributions is None:
+        return
+    if (
+        verdict.baseline is None
+        or verdict.contributions is None
+        or verdict.probability is None
+    ):
+        raise PushRejected(
+            f"{where}: contributions need a baseline and a probability beside them"
+        )
+    if len(verdict.contributions) > MAX_CONTRIBUTIONS:
+        raise PushRejected(
+            f"{where}: {len(verdict.contributions)} contributions, over the "
+            f"{MAX_CONTRIBUTIONS} this server accepts"
+        )
+    values = (verdict.baseline, *verdict.contributions.values())
+    if not all(math.isfinite(value) for value in values):
+        raise PushRejected(f"{where}: contributions must be finite numbers")
+    if not fixmodel.explains(
+        verdict.probability, verdict.baseline, verdict.contributions
+    ):
+        raise PushRejected(f"{where}: contributions do not add up to its P(signal)")
 
 
 def _reject_reviewer_name_clash(fix: FixReviewerPayload) -> None:

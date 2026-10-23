@@ -1,0 +1,35 @@
+{% load help_tags %}
+{% comment %}
+  FIX's reasons for its call, under the verdict they explain. Only ever
+  included from the verdict card's rated branch, and `fix_reasons` is None
+  for an unrated viewer anyway: the gate is selectors.fix_reference_for_component.
+  Each row pairs the metric strip (how unusual the value is for the study) with
+  a push strip (how far it moved FIX, against how far it moved FIX for every
+  component in the study).
+{% endcomment %}
+<div class="fix-reasons" id="fix-reasons">
+  <div class="metric-section reasons-head">FIX's reasons{% help_bubble "chart.fix_reasons" %}</div>
+  <div class="reasons-summary">{{ fix_reasons.summary }}</div>
+  <div class="reason-cols" aria-hidden="true">
+    <span></span><span>value vs cohort</span><span>push on FIX</span><span></span>
+  </div>
+  {% for row in fix_reasons.rows %}
+    <div class="reason-row">
+      <span class="metric-name" title="{{ row.help_title }}">{{ row.name }}</span>
+      {% if row.value_glyph %}{{ row.value_glyph|safe }}{% else %}<span class="glyph reason-constant">constant here</span>{% endif %}
+      {{ row.push_glyph|safe }}
+      <span class="reason-push" style="color:{{ row.push_color }}">{{ row.push_fmt }}</span>
+    </div>
+  {% endfor %}
+  {% if fix_reasons.rest_label %}
+    <div class="reason-row reason-rest">
+      <span class="metric-name">{{ fix_reasons.rest_label }}</span>
+      <span class="glyph"></span>
+      {{ fix_reasons.rest_glyph|safe }}
+      <span class="reason-push" style="color:{{ fix_reasons.rest_color }}">{{ fix_reasons.rest_fmt }}</span>
+    </div>
+  {% endif %}
+  {% if not fix_reasons.banded %}
+    <div class="strip-legend">push bands appear once the cohort has pooled FIX's reasons</div>
+  {% endif %}
+</div>

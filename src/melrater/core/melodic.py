@@ -17,6 +17,8 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 
+from melrater.core.fixmodel import FixContributions
+
 FIX_FILE_RE = re.compile(r"fix4melview_(?P<model>.+)_thr(?P<thr>\d+)\.txt$")
 
 #: Regressors in the Friston-24 motion expansion, not counting the intercept.
@@ -54,6 +56,10 @@ class FixResult:
     model: str
     threshold: int
     verdicts: list[FixVerdict]
+    #: Why FIX made each call, attached after loading by
+    #: `fixmodel.explain_source` -- it takes the model file, which no file
+    #: in the run directory names. None when it has not been, or could not be.
+    contributions: FixContributions | None = None
 
     @property
     def reviewer_name(self) -> str:

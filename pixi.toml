@@ -136,6 +136,12 @@ django-stubs = ">=5.2"
 # `resample` lazily so that importing `services` on the server still works.
 [feature.render.dependencies]
 scipy = ">=1.14"
+# FIX's per-feature reasons are computed at ingest too (melrater/core/fixmodel.py):
+# every built-in pyFIX model is an XGBoost classifier, and XGBoost's own TreeSHAP
+# (`pred_contribs`) is exact for it. The server only ever reads the stored result.
+# CPU builds only — an unconstrained solve takes a CUDA build wherever the
+# solver sees a GPU, and nothing here would use one.
+py-xgboost = { version = ">=3", build = "cpu*" }
 
 [environments]
 # dev carries render too: the test suite renders montages, and ty resolves

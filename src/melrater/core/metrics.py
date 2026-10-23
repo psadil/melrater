@@ -28,6 +28,7 @@ from melrater.core.schemas import (
     MetricStat,
     MetricStats,
     MetricValue,
+    PushNorm,
 )
 
 OUTLIER_Z = 3.0  # |robust z| above which a metric counts as an outlier
@@ -68,14 +69,17 @@ def family_of(name: str) -> str:
     return name.split(":")[0]
 
 
-def compute_metric_stats(table: MetricTable, signal_rows: list[int]) -> MetricStats:
-    """Per-metric distribution bands and the robust-z positions of the
-    FIX-labeled Signal components (the glyphs' green ticks).
+def compute_metric_stats(table: MetricTable) -> MetricStats:
+    """Per-metric distribution bands across one scan's components.
 
     The centre and scale travel with the bands. They are what makes the stored
     z units convertible: a cohort z-score is a different scale over the same
     raw values, and without them a band could only ever be drawn in the frame
     it was computed in.
+
+    Nothing about FIX is in here. The strips used to carry ticks where FIX's
+    Signal components fell, and since a component's own value was among them,
+    a dot sitting on a tick in every row gave FIX's call away before rating.
     """
     p5, p25, p75, p95 = np.percentile(table.z, (5, 25, 75, 95), axis=0)
     return MetricStats(
@@ -89,7 +93,6 @@ def compute_metric_stats(table: MetricTable, signal_rows: list[int]) -> MetricSt
                 p25=float(p25[j]),
                 p75=float(p75[j]),
                 p95=float(p95[j]),
-                signal_z=[float(table.z[i, j]) for i in signal_rows],
             )
             for j, name in enumerate(table.names)
         },
@@ -136,6 +139,34 @@ def build_metric_norms(
     return norms
 
 
+def build_push_norms(
+    values: Mapping[str, Mapping[str, np.ndarray]],
+) -> dict[str, dict[str, PushNorm]]:
+    """Each model's spread of each feature's contribution, in log-odds.
+
+    Plain percentiles, with no centre or scale to convert through as
+    :func:`build_metric_norms` has: a contribution is already in units that
+    mean something, and a push strip is read from zero rather than from a
+    median. A band that sits wholly on one side of zero is the finding -- the
+    model leans that way for nearly everything in the study.
+    """
+    norms: dict[str, dict[str, PushNorm]] = {}
+    for model, by_name in values.items():
+        for name, pooled in by_name.items():
+            v = np.asarray(pooled, dtype=float)
+            if v.size == 0:
+                continue
+            p5, p25, p75, p95 = np.percentile(v, (5, 25, 75, 95))
+            norms.setdefault(model, {})[name] = PushNorm(
+                p5=float(p5),
+                p25=float(p25),
+                p75=float(p75),
+                p95=float(p95),
+                n=int(v.size),
+            )
+    return norms
+
+
 @dataclass(frozen=True)
 class ScanRange:
     """Where one scan's own components sit, in the displayed frame's units."""
@@ -161,7 +192,6 @@ class MetricFrame:
     p25: float
     p75: float
     p95: float
-    signal_z: list[float]  # this scan's FIX Signal components, in frame units
     # This scan's own spread -- the rail the glyph draws above the cohort
     # bands. None when the bands already are this scan, because then the rail
     # would be a copy of them.
@@ -186,7 +216,6 @@ def metric_frame(
             p25=stat.p25,
             p75=stat.p75,
             p95=stat.p95,
-            signal_z=list(stat.signal_z),
             scan_range=None,
         )
 
@@ -202,7 +231,6 @@ def metric_frame(
         p25=norm.p25,
         p75=norm.p75,
         p95=norm.p95,
-        signal_z=[in_cohort(s) for s in stat.signal_z],
         scan_range=ScanRange(
             p25=in_cohort(stat.p25),
             p75=in_cohort(stat.p75),

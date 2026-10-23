@@ -33,24 +33,24 @@ def test_robust_z_value(table: metrics.MetricTable) -> None:
 
 def test_stats_bands_are_ordered(table: metrics.MetricTable) -> None:
     # Act
-    stats = metrics.compute_metric_stats(table, signal_rows=[0])
+    stats = metrics.compute_metric_stats(table)
 
     # Assert
     s = stats.stats["featA"]
     assert s.p5 <= s.p25 <= s.p75 <= s.p95
 
 
-def test_stats_record_signal_ticks(table: metrics.MetricTable) -> None:
+def test_stats_say_nothing_about_fix(table: metrics.MetricTable) -> None:
     # Act
-    stats = metrics.compute_metric_stats(table, signal_rows=[0])
+    stats = metrics.compute_metric_stats(table)
 
-    # Assert
-    assert stats.stats["featA"].signal_z == [pytest.approx(float(table.z[0, 0]))]
+    # Assert: no Signal ticks, which gave FIX's call away before rating
+    assert "signal_z" not in stats.stats["featA"].model_dump()
 
 
 def test_stats_record_dropped(table: metrics.MetricTable) -> None:
     # Act
-    stats = metrics.compute_metric_stats(table, signal_rows=[0])
+    stats = metrics.compute_metric_stats(table)
 
     # Assert
     assert stats.dropped == ["const"]
@@ -60,7 +60,7 @@ def test_stats_record_the_centre_their_z_units_are_measured_from(
     table: metrics.MetricTable,
 ) -> None:
     # Act
-    stats = metrics.compute_metric_stats(table, signal_rows=[0])
+    stats = metrics.compute_metric_stats(table)
 
     # Assert: featA = [1, 2, 30], median 2 — the raw value z = 0 stands for
     assert stats.stats["featA"].median == pytest.approx(2.0)
@@ -70,7 +70,7 @@ def test_stats_record_the_scale_their_z_units_are_measured_in(
     table: metrics.MetricTable,
 ) -> None:
     # Act
-    stats = metrics.compute_metric_stats(table, signal_rows=[0])
+    stats = metrics.compute_metric_stats(table)
 
     # Assert: MAD of [1, 2, 30] is 1, so one z is 1.4826 raw units
     assert stats.stats["featA"].scale == pytest.approx(1.4826)
@@ -147,12 +147,47 @@ def test_metric_norms_leave_out_a_metric_with_no_values() -> None:
     assert "featA" not in norms
 
 
+# --- FIX's pushes, pooled -------------------------------------------------
+
+
+def test_push_norms_keep_each_model_apart() -> None:
+    # Act
+    norms = metrics.build_push_norms(
+        {"ModelA": {"featA": np.array([1.0])}, "ModelB": {"featA": np.array([2.0])}}
+    )
+
+    # Assert
+    assert sorted(norms) == ["ModelA", "ModelB"]
+
+
+def test_push_norms_are_percentiles_in_log_odds() -> None:
+    # Act: no centring and no scaling, unlike a metric's norm
+    norms = metrics.build_push_norms({"M": {"featA": np.arange(101, dtype=float)}})
+
+    # Assert
+    assert norms["M"]["featA"].p95 == pytest.approx(95.0)
+
+
+def test_push_norms_count_what_they_pooled() -> None:
+    # Act
+    norms = metrics.build_push_norms({"M": {"featA": np.array([-1.0, 0.0, 2.0])}})
+
+    # Assert
+    assert norms["M"]["featA"].n == 3
+
+
+def test_push_norms_leave_out_a_feature_with_no_values() -> None:
+    # Act
+    norms = metrics.build_push_norms({"M": {"featA": np.array([])}})
+
+    # Assert
+    assert norms == {}
+
+
 # --- picking a frame for one displayed row --------------------------------
 
 #: featA as `table` scores it: raw 2.0 is the run's median, one z is 1.4826.
-SCAN_STAT = MetricStat(
-    median=2.0, scale=1.4826, p5=-1.0, p25=-0.5, p75=0.5, p95=1.0, signal_z=[1.0]
-)
+SCAN_STAT = MetricStat(median=2.0, scale=1.4826, p5=-1.0, p25=-0.5, p75=0.5, p95=1.0)
 #: A cohort on which raw values are simply tenths.
 COHORT_NORM = MetricNorm(
     median=0.0, scale=10.0, p5=-2.0, p25=-1.0, p75=1.0, p95=2.0, n=900
@@ -210,13 +245,6 @@ def test_metric_frame_places_the_scans_range_in_cohort_units(
 ) -> None:
     # the run's p75 is z 0.5 there, so raw 2 + 0.5*1.4826 = 2.7413
     assert cohort_rail.p75 == pytest.approx(0.27413)
-
-
-def test_metric_frame_places_the_signal_ticks_in_cohort_units(
-    cohort_frame: metrics.MetricFrame,
-) -> None:
-    # the tick at z 1.0 there is raw 3.4826, which the cohort scores at 0.34826
-    assert cohort_frame.signal_z == [pytest.approx(0.34826)]
 
 
 @pytest.fixture

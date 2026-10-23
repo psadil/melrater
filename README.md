@@ -42,7 +42,9 @@ then hand the catalog to `import_run`:
 pixi run -e render manage import_run study.duckdb
 ```
 
-`-e render` is the pixi environment that carries scipy, which resampling the anatomical montage background needs. It is deliberately not in the default environment, because the default one is what the container image is built from and the server never renders anything.
+`-e render` is the pixi environment that carries scipy and xgboost: scipy resamples the anatomical montage background, and xgboost explains FIX's calls (below). Neither is in the default environment, because the default one is what the container image is built from and the server never renders or explains anything.
+
+`import_run` also needs pyFIX's directory of trained models, which FIX's reasons for each call are computed from: `--fix-models`, or `MELRATER_FIX_MODELS` in the environment. It is the `resources/models` directory of the pyFIX install that classified the runs — in the melodic pipeline's environment, `.pixi/envs/default/lib/python3.14/site-packages/pyfix/resources/models`. The command refuses to start without one, because nothing adds reasons to a run once it is ingested. A run whose model is not in the directory, or whose reasons do not add up to the probabilities FIX wrote, still ingests, and the summary names it.
 
 Every MELODIC run the catalog knows is ingested (the motion parameters and per-component variance stats come straight from the catalog's `feat_motion`/`feat_icstats` tables). Already-ingested runs are skipped, and a run with missing or ambiguous inputs is reported and skipped. `--sub/--ses/--task/--run` narrow the import; `--base-dir` rebases the catalog's roots when the data moved after indexing.
 
@@ -66,6 +68,8 @@ pixi run manage refresh_metric_cohort
 
 Run it after a batch of ingests, and **again on the server** after a batch of pushes — the cohort is per database, and `push_runs` has no route to anything but the ingest endpoint. It is a single pass: about a second for a thousand components, so a few minutes for the full campaign. Until it has ever run, and for a feature too new to be in it, the rating screen falls back to scoring a component against its own scan's components alone; the metrics panel says which comparison it is making, because "3 outlier metrics" means a different thing in each. Features that never vary within a scan (`nic`, `dim:*`, `pixdim:*`) are dropped at ingest and so cannot be pooled, even though they do vary between scans.
 
+The same pass pools FIX's reasons: for each pyFIX model, how far each feature moved its log-odds across every component it explained. Those are the bands behind the push strips in the verdict card, and until a cohort holds them the strips are drawn without bands.
+
 ## Rate
 
 ```sh
@@ -81,6 +85,8 @@ On smoothing (`F`): the smoothed map is per-component rescaled, so read cluster 
 On the anatomical background (`D`): the structural is sharper and much easier to name a structure on, but FEAT registers it to the functional with a *linear* transform and nothing models EPI susceptibility distortion, so orbitofrontal, temporal-pole and sinus-adjacent voxels can be several millimetres out. It tells you what a component is sitting on; it is not evidence that the functional data are where it says they are. Judge a component that hugs the brain edge, a sinus or a ventricle on the functional background, which carries the true EPI geometry.
 
 On the motion figure: the FD trace under the timecourse is the same for every component of a run, so the number beside it — the R² of ordinary least squares fitting this component's timecourse on the Friston-24 motion expansion (the six realignment parameters, the same six one volume earlier, and the squares of both) — is the part of that panel that is about the component on screen. Read it against the faint tick on its meter, never against zero: 24 regressors explain 24/(volumes − 1) of *anything*, which is about 0.06 for a 435-volume run and 0.24 for a 100-volume one. Well past the tick says head motion accounts for much of this timecourse; near it says nothing either way. It is computed at ingest from the motion parameters, which never reach the server, so a run ingested before this existed has no value and its panel simply says nothing — re-ingest to give it one.
+
+On FIX's reasons: once you have rated a component, the verdict card lists the eight features that moved FIX's call the most, either way. Every built-in pyFIX model is an XGBoost tree ensemble, and for trees each feature's share of a call can be computed exactly (TreeSHAP; Lundberg et al. 2020, [doi:10.1038/s42256-019-0138-9](https://doi.org/10.1038/s42256-019-0138-9)). Starting from the model's average over its own training data, each feature pushes the log-odds toward Signal or toward Noise, and the pushes add up to the P(signal) FIX reported — ingest refuses any that do not, which is what catches a wrong model file. Each row pairs the feature's value strip (how unusual it is for the study) with a push strip (how far it moved FIX, against how far it moved FIX for every component in the study). They are not the same thing: a value far outside the cohort can barely move FIX, and a push band sitting wholly on one side of zero is a lean FIX has for this whole study. The reasons are hidden until you rate, for the verdict's own reason. So, now, are the metric strips' old green ticks for FIX's Signal components: a component's own value was among them, so a dot sitting on a tick in every row gave FIX's call away before rating.
 
 ### Notes and discussion
 
@@ -112,6 +118,8 @@ Ingesting and pushing can be one step:
 pixi run -e render manage import_run study.duckdb --push "https://$(ssh hetzner vm-host)/melrater" --user <ingest account>
 ```
 
+A pushed run carries FIX's reasons, and the server checks that each verdict's add up to its probability before storing them. Deploy the server before pushing from a newer checkout: an older server refuses the new payloads (HTTP 422), because they no longer carry the metric strips' FIX-Signal ticks its schema requires.
+
 A failed push there is reported separately from a failed ingest: the runs are still on the laptop, and `push_runs` will pick them up. `--dry-run` reports what would be sent; `--new` sends only runs the server has never seen; `--force` re-sends regardless. A run that fails is reported and the batch carries on, with a non-zero exit at the end.
 
 ### The whole thing, repeatedly
@@ -119,7 +127,7 @@ A failed push there is reported separately from a failed ingest: the runs are st
 `deploy/ingest.sh` is those two commands with the three easy mistakes taken out of your hands -- an absolute dataset root, a bidslake CLI that agrees with the rev `pixi.toml` pins, and the `/melrater` prefix on the URL:
 
 ```sh
-MELRATER_PUSH_USER=<ingest account> ./deploy/ingest.sh ~/git/derivatives
+MELRATER_PUSH_USER=<ingest account> MELRATER_FIX_MODELS=<pyfix>/resources/models ./deploy/ingest.sh ~/git/derivatives
 ```
 
 It is written for a tree a pipeline is still filling, which is the normal case. Re-indexing under the same dataset id replaces that root's rows rather than duplicating them, runs already ingested here are skipped, runs the server already holds with the same montages are skipped there, and a run that is only half written is reported and picked up by the next invocation. So the answer to "more runs have landed" is to run it again.
@@ -134,6 +142,26 @@ Re-renders travel the same way. `rerender_montages` cannot run on the server (no
 pixi run -e render manage rerender_montages
 pixi run manage push_runs --force --server "https://$(ssh hetzner vm-host)/melrater" --user <ingest account>
 ```
+
+**Migration note (FIX's reasons).** Migration 0009 gives the FIX verdicts already in a database their reasons. It can only compute them where xgboost, pyFIX's models and the runs' own files are, which means a source checkout, so run it there on purpose:
+
+```sh
+MELRATER_FIX_MODELS=<pyfix>/resources/models pixi run -e render manage migrate
+```
+
+A plain `pixi run manage migrate` in the default environment refuses rather than recording it as applied with nothing filled; migrating back to 0008 and forward again re-runs it. On the server it prints one line and steps aside, and the rows reach it through the `dumpdata --natural-primary` / `loaddata` route everything else the push API does not carry takes. Dump the FIX rows and nothing else: `loaddata` matches rows by natural key, so a local human rating under a username the server also has would overwrite that reviewer's rating there.
+
+```sh
+pixi run manage dumpdata core.classification --natural-foreign --natural-primary \
+  --pks "$(sqlite3 db/db.sqlite3 "select group_concat(c.id) from core_classification c join core_reviewer r on r.id = c.reviewer_id where r.kind = 'fix'")" \
+  -o fix-reasons.json
+scp fix-reasons.json hetzner:/tmp/
+ssh hetzner 'docker cp /tmp/fix-reasons.json melrater-melrater-1:/tmp/ &&
+  docker exec melrater-melrater-1 python -m django loaddata /tmp/fix-reasons.json &&
+  docker exec melrater-melrater-1 python -m django refresh_metric_cohort'
+```
+
+`loaddata` updates those rows in place — the labels and probabilities are the same values, and the timestamps become the laptop's — and it fails as a whole if the server lacks any of the runs.
 
 A successful push drops the superseded set itself (the row is pointed at the new digest, then every other digest of that run is deleted), so after a clean re-push `prune_orphan_montages` on the box reports nothing to do. Run it anyway: it is the safety net for a push that died between storing the files and writing the rows.
 

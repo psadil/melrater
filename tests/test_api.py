@@ -195,6 +195,80 @@ def test_push_carries_the_fix_verdicts(client, ingest_auth, push_bundle) -> None
     )
 
 
+@pytest.fixture
+def explained_bundle(explained_ingested_run, media_root):
+    """`push_bundle` for a run whose FIX verdicts carry their reasons."""
+    return selectors.run_bundle(explained_ingested_run)
+
+
+def test_push_carries_fixs_reasons(client, ingest_auth, explained_bundle) -> None:
+    # Arrange
+    bundle = _as_new_run(explained_bundle)
+    uuid = RunPayload.model_validate_json(bundle[0]).uuid
+
+    # Act
+    _post(client, bundle, ingest_auth)
+
+    # Assert
+    assert not Classification.objects.filter(
+        component__run__uuid=uuid,
+        reviewer__kind=Reviewer.Kind.FIX,
+        contributions__isnull=True,
+    ).exists()
+
+
+def _with_reasons(bundle, **changes):
+    """`bundle` under a fresh uuid, its first FIX verdict's reasons changed."""
+    data = RunPayload.model_validate_json(bundle[0])
+    first = data.fix[0].verdicts[0].model_copy(update=changes)
+    fix = data.fix[0].model_copy(
+        update={"verdicts": [first, *data.fix[0].verdicts[1:]]}
+    )
+    return _as_new_run(
+        (data.model_dump_json().encode(), bundle[1]), fix=[fix, *data.fix[1:]]
+    )
+
+
+def test_push_refuses_reasons_that_do_not_add_up(
+    client, ingest_auth, explained_bundle
+) -> None:
+    # Arrange: a baseline that moves the sum well away from the probability
+    bundle = _with_reasons(explained_bundle, baseline=5.0)
+
+    # Act
+    response = _post(client, bundle, ingest_auth)
+
+    # Assert
+    assert response.status_code == 409
+
+
+def test_push_refuses_reasons_without_a_baseline(
+    client, ingest_auth, explained_bundle
+) -> None:
+    # Arrange
+    bundle = _with_reasons(explained_bundle, baseline=None)
+
+    # Act
+    response = _post(client, bundle, ingest_auth)
+
+    # Assert
+    assert response.status_code == 409
+
+
+def test_push_writes_no_rows_for_reasons_it_refused(
+    client, ingest_auth, explained_bundle
+) -> None:
+    # Arrange
+    bundle = _with_reasons(explained_bundle, baseline=5.0)
+    uuid = RunPayload.model_validate_json(bundle[0]).uuid
+
+    # Act
+    _post(client, bundle, ingest_auth)
+
+    # Assert
+    assert not Run.objects.filter(uuid=uuid).exists()
+
+
 def test_push_stores_every_montage(
     client, ingest_auth, push_bundle, media_root: Path
 ) -> None:

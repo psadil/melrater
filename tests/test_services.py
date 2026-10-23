@@ -5,7 +5,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db.models import ProtectedError
 
-from melrater.core import melodic, montage, resample, selectors, services
+from melrater.core import fixmodel, melodic, montage, resample, selectors, services
 from melrater.core.models import (
     Classification,
     Component,
@@ -14,7 +14,7 @@ from melrater.core.models import (
     Reviewer,
     Run,
 )
-from melrater.core.schemas import MetricNorm
+from melrater.core.schemas import MetricNorm, PushNorm
 from tests.conftest import (
     N_COMPONENTS,
     N_TIMEPOINTS,
@@ -62,6 +62,44 @@ def test_ingest_records_the_raw_scale_its_metric_bands_are_on(
 
 def test_ingest_names_fix_reviewer(ingested_run: Run) -> None:
     assert Reviewer.objects.get(kind=Reviewer.Kind.FIX).name == "TestModel @ thr5"
+
+
+def test_ingest_stores_no_reasons_for_a_verdict_nobody_explained(
+    ingested_run: Run,
+) -> None:
+    # Act
+    explained = Classification.objects.filter(
+        reviewer__kind=Reviewer.Kind.FIX, contributions__isnull=False
+    )
+
+    # Assert
+    assert not explained.exists()
+
+
+def test_ingest_stores_fixs_reasons_beside_its_verdict(
+    explained_ingested_run: Run,
+) -> None:
+    # Act
+    row = Classification.objects.get(
+        component__run=explained_ingested_run,
+        component__index=1,
+        reviewer__kind=Reviewer.Kind.FIX,
+    )
+
+    # Assert: they add up to the probability stored beside them
+    assert fixmodel.explains(row.probability, row.baseline, row.contributions)
+
+
+def test_ingest_stores_each_components_own_reasons(
+    explained_ingested_run: Run,
+) -> None:
+    # Act: component 3 is the fixture's Noise call, 1 and 2 its Signal ones
+    rows = Classification.objects.filter(
+        component__run=explained_ingested_run, reviewer__kind=Reviewer.Kind.FIX
+    ).order_by("component__index")
+
+    # Assert
+    assert [row.contributions["featA"] > 0 for row in rows] == [True, True, False]
 
 
 def test_ingest_stores_fix_labels_in_component_order(ingested_run: Run) -> None:
@@ -681,6 +719,22 @@ def test_store_metric_cohort_keeps_the_norms_it_was_given() -> None:
 
     # Assert
     assert MetricCohort.objects.get().norms["featA"]["scale"] == pytest.approx(2.0)
+
+
+def test_store_metric_cohort_keeps_the_push_bands_it_was_given() -> None:
+    # Arrange
+    push = PushNorm(p5=-1.0, p25=-0.5, p75=0.5, p95=1.0, n=9)
+
+    # Act
+    services.store_metric_cohort(
+        norms={"featA": NORM},
+        n_runs=2,
+        n_components=9,
+        fix_norms={"TestModel": {"featA": push}},
+    )
+
+    # Assert
+    assert MetricCohort.objects.get().fix_norms["TestModel"]["featA"]["p95"] == 1.0
 
 
 def test_store_metric_cohort_replaces_rather_than_accumulates() -> None:

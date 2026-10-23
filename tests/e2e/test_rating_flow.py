@@ -159,6 +159,40 @@ def test_revealing_the_verdict_leaves_the_spectrum_in_view(
     expect(logged_in_page.locator("#spectrum-card")).to_be_in_viewport(ratio=1)
 
 
+def test_rating_reveals_fixs_reasons_in_place(
+    logged_in_explained_page, live_server, explained_ingested_run: Run
+) -> None:
+    # Arrange
+    page = logged_in_explained_page
+    page.goto(f"{live_server.url}/runs/{explained_ingested_run.pk}/ic/1/")
+
+    # Act
+    page.keyboard.press("3")
+    page.wait_for_selector("#fix-reasons .reason-row")
+
+    # Assert: the fixture model splits on featA and featC, and on nothing else
+    expect(page.locator("#fix-reasons .reason-row")).to_have_count(2)
+
+
+def test_fixs_reasons_fit_the_side_column(
+    logged_in_explained_page, live_server, explained_ingested_run: Run
+) -> None:
+    # Arrange: two strips and a number share the 400px column with the name
+    page = logged_in_explained_page
+    page.set_viewport_size(LAPTOP)
+    page.goto(f"{live_server.url}/runs/{explained_ingested_run.pk}/ic/1/")
+    page.keyboard.press("3")
+    page.wait_for_selector("#fix-reasons .reason-row")
+
+    # Act
+    overflow = page.locator("#fix-reasons").evaluate(
+        "el => el.scrollWidth - el.clientWidth"
+    )
+
+    # Assert
+    assert overflow == 0
+
+
 def test_note_hotkey_scrolls_the_note_into_view(
     logged_in_page, live_server, ingested_run: Run
 ) -> None:

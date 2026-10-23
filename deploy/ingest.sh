@@ -4,7 +4,8 @@
 # montages here, and the server only ever receives finished bytes (see "Push
 # runs to the deployment" in the README).
 #
-#   MELRATER_PUSH_USER=<ingest account> ./deploy/ingest.sh ~/git/derivatives
+#   MELRATER_PUSH_USER=<ingest account> MELRATER_FIX_MODELS=<pyfix>/resources/models \
+#     ./deploy/ingest.sh ~/git/derivatives
 #
 # Meant to be re-run against a tree the pipeline is still writing into, which is
 # the whole point of it: re-indexing under the same dataset id replaces that
@@ -34,6 +35,9 @@ CATALOG=${MELRATER_CATALOG:-db/$DATASET.duckdb}
 # Checked before the index rather than at the push: the push is the last step,
 # and discovering the account is missing there wastes the whole render.
 : "${MELRATER_PUSH_USER:?set it to an account in the deployment ingest group}"
+# Checked here for the same reason: import_run refuses to start without the
+# models FIX's reasons are computed from, and would only say so after the index.
+: "${MELRATER_FIX_MODELS:?set it to the pyFIX trained-model directory (its resources/models)}"
 
 # The CLI writes the catalog the wheel queries, so the two pins have to agree. A
 # CLI older than the pin writes no feat_icstats table, and import_run then

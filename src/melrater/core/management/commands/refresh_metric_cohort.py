@@ -10,6 +10,10 @@ runs, and therefore its own cohort). Until it has run at all, every strip
 falls back to comparing a component only with the others in its own scan,
 which is what melrater did before cohorts existed.
 
+It pools FIX's reasons the same way: for each model, how far each feature
+moved its log-odds across every component it explained, which is what the
+verdict card's push strips are read against.
+
 Cheap to re-run and safe to interrupt: nothing else writes the row, and the
 previous cohort stays in place until a new one is complete.
 """
@@ -46,14 +50,21 @@ class Command(TyperCommand):
         for name in constant:
             self.stdout.write(f"constant across the cohort, not pooled: {name}")
 
+        pushes = selectors.fix_contribution_values(chunk_size=chunk_size)
+        fix_norms = metrics.build_push_norms(pushes.values)
+
         summary = (
             f"{len(norms)} metrics over {sweep.n_components} components "
-            f"in {sweep.n_runs} runs"
+            f"in {sweep.n_runs} runs; FIX's reasons from {len(fix_norms)} "
+            f"model(s) over {pushes.n_components} components"
         )
         if dry_run:
             self.stdout.write(f"would store {summary}")
             return
         services.store_metric_cohort(
-            norms=norms, n_runs=sweep.n_runs, n_components=sweep.n_components
+            norms=norms,
+            n_runs=sweep.n_runs,
+            n_components=sweep.n_components,
+            fix_norms=fix_norms,
         )
         self.stdout.write(f"stored {summary}")

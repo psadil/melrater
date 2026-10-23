@@ -7,11 +7,13 @@ ever carries components they have rated. Separate from `test_selectors.py`,
 which is deliberately database-free.
 """
 
+import math
+
 import pytest
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
-from melrater.core import selectors, services
+from melrater.core import fixmodel, selectors, services
 from melrater.core.models import Classification, Component, Reviewer, Run
 
 pytestmark = pytest.mark.django_db
@@ -150,3 +152,96 @@ def test_fix_reference_strip_carries_your_label(component, user) -> None:
 
     # Assert
     assert reference.strip[0].user_label == "Noise"
+
+
+# --- FIX's reasons ------------------------------------------------------
+
+#: FIX's reasons for component 1: ten features, so two fall below the cut.
+PUSHES = (0.9, -2.0, 0.1, 0.5, -0.05, 1.5, -0.3, 0.2, 0.7, -0.6)
+REASONS = {f"feat{i}": push for i, push in enumerate(PUSHES)}
+#: Chosen so that the reasons add up to component 1's P(signal) of 0.9.
+BASELINE = math.log(0.9 / 0.1) - math.fsum(PUSHES)
+
+
+@pytest.fixture
+def explained(component) -> Component:
+    """Component 1, its FIX row now carrying the reasons for its call."""
+    Classification.objects.filter(
+        component=component, reviewer__kind=Reviewer.Kind.FIX
+    ).update(baseline=BASELINE, contributions=REASONS)
+    return component
+
+
+def test_fix_reference_hides_the_reasons_until_you_rate(explained, user) -> None:
+    # Act
+    reference = _reference(explained, user)
+
+    # Assert: they add up to FIX's call, so they are its call in another form
+    assert reference.reasons is None
+
+
+def test_fix_reference_reveals_the_reasons_once_you_rate(explained, user) -> None:
+    # Arrange
+    services.rate_component(user=user, component=explained, label="Noise")
+
+    # Act
+    reference = _reference(explained, user)
+
+    # Assert
+    assert reference.reasons is not None
+
+
+@pytest.fixture
+def revealed(explained, user) -> selectors.FixReasons:
+    """The reasons as a viewer who has rated sees them (the test above pins that)."""
+    services.rate_component(user=user, component=explained, label="Noise")
+    reasons = _reference(explained, user).reasons
+    assert reasons is not None
+    return reasons
+
+
+def test_fix_reference_lists_the_largest_pushes_first(revealed) -> None:
+    # either direction, by size, and only REASONS_SHOWN of them
+    assert [row.name for row in revealed.rows] == [
+        "feat1",
+        "feat5",
+        "feat0",
+        "feat8",
+        "feat9",
+        "feat3",
+        "feat6",
+        "feat7",
+    ]
+
+
+def test_fix_reference_sums_the_reasons_it_does_not_list(revealed) -> None:
+    # feat2 (+0.1) and feat4 (-0.05)
+    assert revealed.rest_push == pytest.approx(0.05)
+
+
+def test_fix_reference_counts_the_reasons_it_does_not_list(revealed) -> None:
+    assert revealed.n_rest == 2
+
+
+def test_fix_reference_reasons_add_up_to_fixs_call(revealed) -> None:
+    assert fixmodel.logistic(revealed.logit) == pytest.approx(0.9)
+
+
+def test_fix_reference_names_the_model_the_cohort_bands_are_kept_under(
+    revealed,
+) -> None:
+    assert revealed.model == "TestModel"
+
+
+def test_fix_reference_gives_no_reasons_for_a_row_stored_without_them(
+    runs, user
+) -> None:
+    # Arrange: component 2's FIX row predates reasons
+    second = Component.objects.get(run=runs[0], index=2)
+    services.rate_component(user=user, component=second, label="Noise")
+
+    # Act
+    reference = _reference(second, user)
+
+    # Assert
+    assert reference.reasons is None

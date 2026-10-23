@@ -1,5 +1,7 @@
 """Shared fixtures: a tiny synthetic MELODIC+pyFIX derivatives directory."""
 
+import base64
+import json
 from pathlib import Path
 
 import nibabel as nib
@@ -80,6 +82,92 @@ def melodic_dir(tmp_path: Path) -> Path:
         "[2, 3]\n"
     )
     return root
+
+
+#: The pyFIX model the explained fixtures are classified by. It is the name the
+#: shared fixture's fix4melview file already carries, so `run_inputs` serves both.
+FIX_MODEL = "TestModel"
+
+
+def write_pyfix_model(
+    path: Path, booster, *, features: list[str] | None = None, model_type="xgboost"
+) -> Path:
+    """`booster` in pyFIX's model-file format, as `pyfix.io.save_model` writes it.
+
+    Format 0.4.0 by default, which names no features, as the built-in UKBiobank
+    model does; pass `features` for a 0.5.0 file.
+    """
+    meta = {
+        "pyfix_version": "0.10.0",
+        "model_type": model_type,
+        "model_contents": base64.b64encode(bytes(booster.save_raw("json"))).decode(),
+    }
+    if features is not None:
+        meta |= {"format_version": "0.5.0", "features": features}
+    path.write_text("PYFIX\n" + json.dumps(meta))
+    return path
+
+
+@pytest.fixture
+def fix_models_dir(tmp_path: Path) -> Path:
+    """A pyFIX model directory holding one small model for the fixture's features.
+
+    Trained on the same four columns `melodic_dir` writes, with Signal meaning
+    low featA and low featC. The constant column is one no tree can split on,
+    which is the case of a feature a model never uses.
+    """
+    import xgboost
+
+    rng = np.random.default_rng(11)
+    n = 80
+    x = np.column_stack(
+        [
+            rng.uniform(0, 40, n),
+            rng.uniform(4, 8, n),
+            np.full(n, 7.0),
+            rng.uniform(0, 0.4, n),
+        ]
+    )
+    y = ((x[:, 0] < 10) & (x[:, 3] < 0.25)).astype(int)
+    booster = xgboost.train(
+        {"objective": "binary:logistic", "max_depth": 2, "eta": 0.5, "seed": 0},
+        xgboost.DMatrix(x, label=y),
+        num_boost_round=6,
+    )
+    directory = tmp_path / "models"
+    directory.mkdir()
+    write_pyfix_model(directory / f"{FIX_MODEL}.pyfix_model", booster)
+    return directory
+
+
+@pytest.fixture
+def explained_melodic_dir(melodic_dir: Path, fix_models_dir: Path) -> Path:
+    """`melodic_dir`, classified by the model in `fix_models_dir`.
+
+    Its fix4melview file is rewritten from that model's own predictions, as
+    pyFIX would write it, so the reasons computed from the model add up to the
+    probabilities the file reports. Separate from `melodic_dir` for the reason
+    `anat_melodic_dir` is: FIX verdicts that carry no reasons stay the shared
+    fixture's standing case.
+    """
+    import xgboost
+
+    from melrater.core import fixmodel, melodic
+
+    model = fixmodel.load_model(fix_models_dir / f"{FIX_MODEL}.pyfix_model")
+    _, table = melodic.load_features(melodic_dir / "fix" / "features.csv")
+    lines = ["filtered_func_data.ica"]
+    noise = []
+    for i, p in enumerate(model.booster.predict(xgboost.DMatrix(table)), start=1):
+        label = "Signal" if p > 0.05 else "Noise"
+        lines.append(f"{i}, {label}, {label == 'Noise'}, {p:.6f}")
+        if label == "Noise":
+            noise.append(str(i))
+    lines.append(f"[{', '.join(noise)}]")
+    (melodic_dir / f"fix4melview_{FIX_MODEL}_thr5.txt").write_text(
+        "\n".join(lines) + "\n"
+    )
+    return melodic_dir
 
 
 def write_registration(root: Path) -> Path:
@@ -186,6 +274,20 @@ def ingested_run(melodic_dir: Path, media_root: Path):
     from melrater.core import melodic, services
 
     return services.ingest_run(source=melodic.load_run(run_inputs(melodic_dir)))
+
+
+@pytest.fixture
+def explained_ingested_run(
+    explained_melodic_dir: Path, fix_models_dir: Path, media_root: Path
+):
+    """A run whose FIX verdicts carry their reasons, as `import_run` stores them."""
+    from melrater.core import fixmodel, melodic, services
+
+    source, _ = fixmodel.explain_source(
+        melodic.load_run(run_inputs(explained_melodic_dir)),
+        fixmodel.ModelShelf(fix_models_dir),
+    )
+    return services.ingest_run(source=source)
 
 
 @pytest.fixture

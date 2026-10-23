@@ -4,7 +4,7 @@ import re
 import pytest
 from django.core.management import call_command
 
-from melrater.core import keys, selectors, services
+from melrater.core import charts, keys, selectors, services
 from melrater.core.models import Classification, DiscussionPost, Run
 
 pytestmark = pytest.mark.django_db
@@ -124,6 +124,104 @@ def test_rating_one_component_does_not_reveal_another(
 
     # Assert
     assert FIX_REVIEWER not in response.content.decode()
+
+
+def test_component_detail_draws_nothing_in_fixs_signal_colour(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{ingested_run.pk}/ic/1/")
+
+    # Assert: the metric strips used to tick FIX's Signal components, this one
+    # among them, which gave its call away in every row before rating
+    assert charts.C_SIGNAL not in response.content.decode()
+
+
+#: The reasons section's own id: nothing else on the page carries it.
+REASONS = 'id="fix-reasons"'
+
+
+def test_component_detail_hides_fixs_reasons_until_you_rate(
+    logged_in, explained_ingested_run: Run
+) -> None:
+    # Act
+    response = logged_in.get(f"/runs/{explained_ingested_run.pk}/ic/1/")
+
+    # Assert
+    assert REASONS not in response.content.decode()
+
+
+def test_component_detail_shows_fixs_reasons_once_you_rate(
+    logged_in, explained_ingested_run: Run
+) -> None:
+    # Arrange
+    run = explained_ingested_run
+    logged_in.post(f"/runs/{run.pk}/ic/1/rate/", {"label": "Noise"})
+
+    # Act
+    response = logged_in.get(f"/runs/{run.pk}/ic/1/")
+
+    # Assert
+    assert REASONS in response.content.decode()
+
+
+def test_rating_reveals_fixs_reasons(logged_in, explained_ingested_run: Run) -> None:
+    # Act: they ride in the out-of-band verdict card
+    response = logged_in.post(
+        f"/runs/{explained_ingested_run.pk}/ic/1/rate/", {"label": "Noise"}
+    )
+
+    # Assert
+    assert REASONS in response.content.decode()
+
+
+def test_fixs_reasons_say_which_side_of_the_threshold_it_landed(
+    logged_in, explained_ingested_run: Run
+) -> None:
+    # Act: component 1 is the fixture model's confident Signal call
+    response = logged_in.post(
+        f"/runs/{explained_ingested_run.pk}/ic/1/rate/", {"label": "Noise"}
+    )
+
+    # Assert
+    assert "Signal by" in response.content.decode()
+
+
+def test_fixs_reasons_wait_for_the_cohort_before_drawing_push_bands(
+    logged_in, explained_ingested_run: Run
+) -> None:
+    # Act
+    response = logged_in.post(
+        f"/runs/{explained_ingested_run.pk}/ic/1/rate/", {"label": "Noise"}
+    )
+
+    # Assert
+    assert "push bands appear once" in response.content.decode()
+
+
+def test_fixs_reasons_draw_push_bands_from_the_cohort(
+    logged_in, explained_ingested_run: Run
+) -> None:
+    # Arrange
+    call_command("refresh_metric_cohort")
+
+    # Act
+    response = logged_in.post(
+        f"/runs/{explained_ingested_run.pk}/ic/1/rate/", {"label": "Noise"}
+    )
+
+    # Assert
+    assert "push bands appear once" not in response.content.decode()
+
+
+def test_a_verdict_stored_without_reasons_shows_none(
+    logged_in, ingested_run: Run
+) -> None:
+    # Act
+    response = logged_in.post(f"/runs/{ingested_run.pk}/ic/1/rate/", {"label": "Noise"})
+
+    # Assert
+    assert REASONS not in response.content.decode()
 
 
 def test_component_detail_offers_axis_switcher(logged_in, ingested_run: Run) -> None:

@@ -19,7 +19,7 @@ from django.views.decorators.cache import cache_control
 from django.views.decorators.http import require_http_methods
 from django.views.static import serve
 
-from melrater.core import charts, metrics, selectors, services
+from melrater.core import charts, fixmodel, metrics, selectors, services
 from melrater.core import help as help_catalog
 from melrater.core.metrics import OUTLIER_Z, MetricFrame, family_of
 from melrater.core.models import Component, DiscussionPost, Run
@@ -206,10 +206,129 @@ def _metric_panel(
     }
 
 
+@dataclass(frozen=True)
+class ReasonView:
+    """One of FIX's reasons as the verdict card draws it."""
+
+    name: str
+    help_title: str
+    value_glyph: str  # "" for a feature this scan stores no value for
+    push_glyph: str
+    push_fmt: str
+    push_color: str
+
+
+@dataclass(frozen=True)
+class ReasonsPanel:
+    """The verdict card's reasons section, fully drawn."""
+
+    summary: str
+    rows: list[ReasonView]
+    rest_label: str  # "" when every feature the model uses is listed
+    rest_glyph: str
+    rest_fmt: str
+    rest_color: str
+    #: Whether the cohort has push bands for this model yet. Until
+    #: `refresh_metric_cohort` has pooled some reasons, the strips have none.
+    banded: bool
+
+
+def _reasons_summary(reasons: selectors.FixReasons) -> str:
+    """Where FIX started, where it ended up, and how far that is from its threshold.
+
+    The margin is taken from the stored probability rather than from the
+    summed contributions. The two agree to within fixmodel's tolerance, but
+    only the probability is what FIX actually thresholded, so only it is
+    guaranteed to land on the same side as the label shown above.
+    """
+    start = fixmodel.logistic(reasons.baseline)
+    p = reasons.probability
+    end = p if p is not None else fixmodel.logistic(reasons.logit)
+    text = (
+        f"{reasons.reviewer}: from P {start:.3g} (its training average) to P {end:.3g}"
+    )
+    thr = reasons.threshold
+    if thr is not None and 0.0 < thr < 1.0:
+        logit = (
+            fixmodel.log_odds(p) if p is not None and 0.0 < p < 1.0 else reasons.logit
+        )
+        margin = logit - fixmodel.log_odds(thr)
+        side = "Signal" if margin > 0 else "Noise"
+        text += f" · {side} by {abs(margin):.2f} log-odds at thr {thr:g}"
+    return text
+
+
+def _reasons_panel(
+    reasons: selectors.FixReasons | None,
+    run_data: RunData,
+    comp: ComponentData,
+    cohort: CohortData | None,
+) -> ReasonsPanel | None:
+    """Each reason's value strip beside its push strip, for the verdict card.
+
+    None whenever the selector gave no reasons, which is always the case for a
+    viewer who has not rated: the gate is upstream, in
+    `selectors.fix_reference_for_component`, and this only draws what passed.
+    """
+    if reasons is None:
+        return None
+    norms = cohort.norms if cohort is not None else {}
+    pushes = cohort.fix_norms.get(reasons.model, {}) if cohort is not None else {}
+    stats = run_data.metric_stats.stats
+    rows: list[ReasonView] = []
+    for row in reasons.rows:
+        value = comp.metrics.get(row.name)
+        stat = stats.get(row.name)
+        if value is not None and stat is not None:
+            frame = metrics.metric_frame(
+                value=value, stat=stat, norm=norms.get(row.name)
+            )
+            value_glyph = charts.metric_glyph_svg(frame)
+            where = _frame_label(cohort) if frame.cohort else "within this scan"
+            described = f"value {value.raw:.3g}, z={frame.z:+.1f} {where}"
+        else:
+            # constant across the scan's components, so ingest kept no value
+            value_glyph = ""
+            described = "the same value for every component of this scan"
+        toward = (
+            " toward Signal"
+            if row.push > 0
+            else " toward Noise"
+            if row.push < 0
+            else ""
+        )
+        rows.append(
+            ReasonView(
+                name=row.name,
+                help_title=(
+                    f"{help_catalog.metric_tooltip(row.name)}\n{described}\n"
+                    f"push {row.push:+.2f} log-odds{toward}"
+                ),
+                value_glyph=value_glyph,
+                push_glyph=charts.push_glyph_svg(row.push, pushes.get(row.name)),
+                push_fmt=f"{row.push:+.2f}",
+                push_color=charts.push_color(row.push),
+            )
+        )
+    n_rest = reasons.n_rest
+    return ReasonsPanel(
+        summary=_reasons_summary(reasons),
+        rows=rows,
+        rest_label=f"{n_rest} other feature{'' if n_rest == 1 else 's'}"
+        if n_rest
+        else "",
+        rest_glyph=charts.push_glyph_svg(reasons.rest_push, None),
+        rest_fmt=f"{reasons.rest_push:+.2f}",
+        rest_color=charts.push_color(reasons.rest_push),
+        banded=bool(pushes),
+    )
+
+
 def _component_context(run: Run, component: Component, user: AbstractBaseUser) -> dict:
     # typed projections at the ORM boundary (see schemas.py)
     run_data = selectors.run_data(run)
     comp = selectors.component_data(component)
+    cohort = selectors.metric_cohort()
     index = comp.index
     indices = selectors.component_indices(run)
     n_total = len(indices)
@@ -241,6 +360,7 @@ def _component_context(run: Run, component: Component, user: AbstractBaseUser) -
         "smoothing_buttons": selectors.smoothing_buttons(run),
         "fix": fix,
         "prob_strip": prob_strip,
+        "fix_reasons": _reasons_panel(fix.reasons, run_data, comp, cohort),
         "user_label": user_labels.get(index),
         "notes": notes,
         # The standing pre-rating warning. `component_note` overrides it with
@@ -257,7 +377,7 @@ def _component_context(run: Run, component: Component, user: AbstractBaseUser) -
         "total_var_fmt": f"{comp.total_var:.2f}",
         "tr_fmt": f"{run_data.tr:g}",
     }
-    context.update(_metric_panel(run_data, comp, selectors.metric_cohort()))
+    context.update(_metric_panel(run_data, comp, cohort))
     return context
 
 

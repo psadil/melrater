@@ -10,8 +10,8 @@ from django.core.management.base import CommandError
 
 from melrater.core import lake
 from melrater.core.api import INGEST_GROUP
-from melrater.core.models import MetricCohort, Run
-from tests.conftest import montage_dir, run_inputs
+from melrater.core.models import Classification, MetricCohort, Reviewer, Run
+from tests.conftest import FIX_MODEL, montage_dir, run_inputs
 
 pytestmark = pytest.mark.django_db
 
@@ -97,23 +97,99 @@ def two_runs(monkeypatch, melodic_dir: Path, tmp_path: Path):
     return healthy, broken
 
 
+@pytest.fixture
+def no_models(tmp_path: Path) -> Path:
+    """A model directory with nothing in it: every FIX result goes unexplained."""
+    path = tmp_path / "no-models"
+    path.mkdir()
+    return path
+
+
+def _import(catalog: Path, models: Path, *args: str) -> None:
+    call_command(
+        "import_run", str(catalog), "--workers", "1", "--fix-models", str(models), *args
+    )
+
+
 def test_import_run_reports_a_failure_by_exiting_non_zero(
-    catalog: Path, two_runs, media_root: Path
+    catalog: Path, two_runs, media_root: Path, no_models: Path
 ) -> None:
     # Act / Assert
     with pytest.raises(CommandError, match="could not be ingested"):
-        call_command("import_run", str(catalog), "--workers", "1")
+        _import(catalog, no_models)
 
 
 def test_import_run_keeps_going_past_a_broken_run(
-    catalog: Path, two_runs, media_root: Path
+    catalog: Path, two_runs, media_root: Path, no_models: Path
 ) -> None:
     # Act: the healthy run comes first, the broken one must not undo it
     with pytest.raises(CommandError):
-        call_command("import_run", str(catalog), "--workers", "1")
+        _import(catalog, no_models)
 
     # Assert
     assert Run.objects.count() == 1
+
+
+def test_import_run_refuses_to_start_without_a_model_directory(
+    catalog: Path, two_runs, media_root: Path
+) -> None:
+    # Act / Assert: nothing adds reasons to a run after ingest, so a campaign
+    # without them is refused up front rather than discovered afterwards
+    with pytest.raises(CommandError, match="--fix-models"):
+        call_command("import_run", str(catalog), "--fix-models", "")
+
+
+def test_import_run_refuses_a_model_directory_that_is_not_there(
+    catalog: Path, two_runs, media_root: Path, tmp_path: Path
+) -> None:
+    # Act / Assert
+    with pytest.raises(CommandError, match="not a directory"):
+        _import(catalog, tmp_path / "missing")
+
+
+@pytest.fixture
+def one_explained_run(monkeypatch, explained_melodic_dir: Path):
+    """A catalog that resolves to the explained fixture run alone."""
+    found = lake.DiscoveredRun(
+        label=explained_melodic_dir.name,
+        root=explained_melodic_dir,
+        inputs=run_inputs(explained_melodic_dir),
+    )
+    monkeypatch.setattr(lake, "open_catalog", lambda *a, **k: None)
+    monkeypatch.setattr(lake, "discover_runs", lambda *a, **k: [found])
+    return found
+
+
+def test_import_run_stores_fixs_reasons(
+    catalog: Path, one_explained_run, media_root: Path, fix_models_dir: Path
+) -> None:
+    # Act
+    _import(catalog, fix_models_dir)
+
+    # Assert
+    assert not Classification.objects.filter(
+        reviewer__kind=Reviewer.Kind.FIX, contributions__isnull=True
+    ).exists()
+
+
+def test_import_run_ingests_a_run_whose_model_is_missing(
+    catalog: Path, one_explained_run, media_root: Path, no_models: Path
+) -> None:
+    # Act: FIX's verdict is still FIX's verdict without its reasons
+    _import(catalog, no_models)
+
+    # Assert
+    assert Run.objects.count() == 1
+
+
+def test_import_run_names_a_run_it_could_not_explain(
+    catalog: Path, one_explained_run, media_root: Path, no_models: Path, capsys
+) -> None:
+    # Act
+    _import(catalog, no_models)
+
+    # Assert
+    assert f"no {FIX_MODEL}.pyfix_model" in capsys.readouterr().err
 
 
 def test_import_run_dry_run_writes_nothing(
@@ -227,6 +303,66 @@ def test_refresh_metric_cohort_records_the_pooled_centre(ingested_run: Run) -> N
     # Assert: featA = [1, 2, 30] is the whole cohort here, so its median is 2
     norms = MetricCohort.objects.get().norms
     assert norms["featA"]["median"] == pytest.approx(2.0)
+
+
+def test_refresh_metric_cohort_pools_fixs_reasons_by_model(
+    explained_ingested_run: Run,
+) -> None:
+    # Act
+    call_command("refresh_metric_cohort")
+
+    # Assert
+    assert set(MetricCohort.objects.get().fix_norms) == {FIX_MODEL}
+
+
+def test_refresh_metric_cohort_pools_each_feature_fix_split_on(
+    explained_ingested_run: Run,
+) -> None:
+    # Act
+    call_command("refresh_metric_cohort")
+
+    # Assert: the small model splits on featA and featC and nothing else
+    assert set(MetricCohort.objects.get().fix_norms[FIX_MODEL]) == {"featA", "featC"}
+
+
+def test_refresh_metric_cohort_counts_a_component_once_per_model(
+    explained_ingested_run: Run,
+) -> None:
+    # Arrange: a second threshold of the same model holds the same reasons
+    second = Reviewer.objects.create(
+        kind=Reviewer.Kind.FIX,
+        name=f"{FIX_MODEL} @ thr10",
+        fix_model=FIX_MODEL,
+        fix_threshold=10,
+    )
+    Classification.objects.bulk_create(
+        Classification(
+            component=row.component,
+            reviewer=second,
+            label=row.label,
+            probability=row.probability,
+            baseline=row.baseline,
+            contributions=row.contributions,
+        )
+        for row in Classification.objects.filter(reviewer__kind=Reviewer.Kind.FIX)
+    )
+
+    # Act
+    call_command("refresh_metric_cohort")
+
+    # Assert: three components, not six reviews of them
+    norms = MetricCohort.objects.get().fix_norms
+    assert norms[FIX_MODEL]["featA"]["n"] == explained_ingested_run.components.count()
+
+
+def test_refresh_metric_cohort_stores_no_reasons_where_there_are_none(
+    ingested_run: Run,
+) -> None:
+    # Act
+    call_command("refresh_metric_cohort")
+
+    # Assert
+    assert MetricCohort.objects.get().fix_norms == {}
 
 
 def test_refresh_metric_cohort_dry_run_stores_nothing(ingested_run: Run) -> None:
