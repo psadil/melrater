@@ -1,3 +1,4 @@
+import contextlib
 from pathlib import Path
 
 import pytest
@@ -273,18 +274,6 @@ def test_ingest_run_twice_raises(ingested_run: Run, melodic_dir: Path) -> None:
         services.ingest_run(source=melodic.load_run(run_inputs(melodic_dir)))
 
 
-def test_rate_component_updates_in_place(ingested_run: Run, user) -> None:
-    # Arrange
-    component = Component.objects.get(run=ingested_run, index=2)
-
-    # Act
-    first = services.rate_component(user=user, component=component, label="Signal")
-    second = services.rate_component(user=user, component=component, label="Noise")
-
-    # Assert: one row per (component, human reviewer), updated in place
-    assert (first.pk, second.label) == (second.pk, "Noise")
-
-
 def test_rate_component_creates_human_reviewer(ingested_run: Run, user) -> None:
     # Arrange
     component = Component.objects.get(run=ingested_run, index=2)
@@ -423,6 +412,174 @@ def test_set_component_note_rejects_an_overlong_note(ingested_run: Run, user) ->
         services.set_component_note(
             user=user, component=component, note="x" * (services.NOTE_MAX_LENGTH + 1)
         )
+
+
+# --- rating history -------------------------------------------------------
+
+
+@pytest.fixture
+def bare_component(bare_runs) -> Component:
+    """A component with no FIX rows: every Classification on it is a rater's."""
+    return Component.objects.get(run=bare_runs(1)[0], index=1)
+
+
+def _history(component: Component, user) -> list[Classification]:
+    return list(
+        Classification.history.filter(
+            component=component, reviewer__user=user
+        ).order_by("pk")
+    )
+
+
+def test_rerating_adds_a_row(bare_component: Component, user) -> None:
+    # Arrange
+    services.rate_component(user=user, component=bare_component, label="Signal")
+
+    # Act
+    services.rate_component(user=user, component=bare_component, label="Noise")
+
+    # Assert
+    assert len(_history(bare_component, user)) == 2
+
+
+def test_rerating_keeps_the_first_call(bare_component: Component, user) -> None:
+    # Arrange: the call made before FIX's verdict was shown
+    services.rate_component(user=user, component=bare_component, label="Signal")
+
+    # Act
+    services.rate_component(user=user, component=bare_component, label="Noise")
+
+    # Assert
+    assert _history(bare_component, user)[0].label == "Signal"
+
+
+def test_rerating_makes_the_newest_label_current(
+    bare_component: Component, user
+) -> None:
+    # Arrange
+    services.rate_component(user=user, component=bare_component, label="Signal")
+
+    # Act
+    services.rate_component(user=user, component=bare_component, label="Noise")
+
+    # Assert
+    assert (
+        Classification.objects.get(component=bare_component, reviewer__user=user).label
+        == "Noise"
+    )
+
+
+def test_rating_the_same_label_again_still_adds_a_row(
+    bare_component: Component, user
+) -> None:
+    # Arrange
+    services.rate_component(user=user, component=bare_component, label="Noise")
+
+    # Act: a confirmation is a classification too
+    services.rate_component(user=user, component=bare_component, label="Noise")
+
+    # Assert
+    assert len(_history(bare_component, user)) == 2
+
+
+def test_a_rating_is_marked_as_one(bare_component: Component, user) -> None:
+    # Act
+    rating = services.rate_component(user=user, component=bare_component, label="Noise")
+
+    # Assert
+    assert rating.action == Classification.Action.RATE
+
+
+def test_a_refused_label_adds_no_row(bare_component: Component, user) -> None:
+    # Arrange
+    services.rate_component(user=user, component=bare_component, label="Noise")
+
+    # Act
+    with contextlib.suppress(ValueError):
+        services.rate_component(user=user, component=bare_component, label="Artifact")
+
+    # Assert
+    assert len(_history(bare_component, user)) == 1
+
+
+def test_a_rating_keeps_the_note_it_was_sent_with(
+    bare_component: Component, user
+) -> None:
+    # Arrange
+    services.rate_component(
+        user=user, component=bare_component, label="Noise", note="edge ring"
+    )
+
+    # Act: the note rewritten afterwards, on its own
+    services.set_component_note(
+        user=user, component=bare_component, note="sagittal sinus"
+    )
+
+    # Assert
+    assert _history(bare_component, user)[0].note == "edge ring"
+
+
+def test_a_note_saved_on_its_own_is_a_row_of_its_own(
+    bare_component: Component, user
+) -> None:
+    # Arrange
+    services.rate_component(user=user, component=bare_component, label="Noise")
+
+    # Act
+    stored = services.set_component_note(
+        user=user, component=bare_component, note="edge ring"
+    )
+
+    # Assert
+    assert stored is not None and stored.action == Classification.Action.NOTE
+
+
+def test_an_unchanged_note_adds_no_row(bare_component: Component, user) -> None:
+    # Arrange: the rating POST already carried the note, as the page's does
+    services.rate_component(
+        user=user, component=bare_component, label="Noise", note="edge ring"
+    )
+
+    # Act: the blur save of the same text, landing after it
+    services.set_component_note(user=user, component=bare_component, note="edge ring")
+
+    # Assert
+    assert len(_history(bare_component, user)) == 1
+
+
+def test_a_note_saved_before_a_rerating_leaves_the_old_rating_alone(
+    bare_component: Component, user
+) -> None:
+    # Arrange: the page's race -- an edited note's blur save lands just before
+    # the re-rating that carries the same note
+    services.rate_component(
+        user=user, component=bare_component, label="Signal", note="network"
+    )
+    services.set_component_note(
+        user=user, component=bare_component, note="motion after all"
+    )
+
+    # Act
+    services.rate_component(
+        user=user, component=bare_component, label="Noise", note="motion after all"
+    )
+
+    # Assert
+    assert [(row.label, row.note) for row in _history(bare_component, user)] == [
+        ("Signal", "network"),
+        ("Signal", "motion after all"),
+        ("Noise", "motion after all"),
+    ]
+
+
+def test_ingest_marks_fix_verdicts_as_ratings(ingested_run: Run) -> None:
+    # Act
+    others = Classification.history.filter(
+        component__run=ingested_run, reviewer__kind=Reviewer.Kind.FIX
+    ).exclude(action=Classification.Action.RATE)
+
+    # Assert
+    assert not others.exists()
 
 
 def test_deleting_a_rater_is_refused_while_they_have_ratings(

@@ -3,7 +3,7 @@
 A web app for reviewing MELODIC ICA components, modeled on [fsleyes's melodic scene](https://open.oxcin.ox.ac.uk/pages/fsl/fsleyes/fsleyes/userdoc/ic_classification.html) with two additions:
 
 - **More context per component** — the framewise-displacement (motion) timecourse rendered time-aligned under the IC timecourse, captioned with how much of *this* component's timecourse head motion explains, and every pyFIX classifier metric shown against its distribution across every component of every scan (outliers surfaced first).
-- **Integrated multi-reviewer classification** — automated pyFIX verdicts are stored as reviewers (a model + threshold, e.g. `UKBiobank @ thr1`) alongside human reviewers. A reviewer sees FIX's call on a component only once they have rated it themselves, so the classifier cannot anchor the human label.
+- **Integrated multi-reviewer classification** — automated pyFIX verdicts are stored as reviewers (a model + threshold, e.g. `UKBiobank @ thr1`) alongside human reviewers. A reviewer sees FIX's call on a component only once they have rated it themselves, so the classifier cannot anchor the human label — and every rating is kept, so that first call survives a change of mind made after seeing FIX's.
 - **A place to argue about a component** — each one has a discussion thread, which opens to a reviewer once they have rated it, plus a private note that only its author ever sees.
 
 ## Setup
@@ -92,10 +92,41 @@ On FIX's reasons: once you have rated a component, the verdict card lists the ei
 
 Two places to write, with different audiences:
 
-- **Your note**, on the rating tab, is stored against your own rating and is **private to you** — no other reviewer sees it, now or later. (It was briefly shared with reviewers who had already rated; it is not any more. Say so to anyone who wrote one under the old rule.)
+- **Your note**, on the rating tab, is stored against your own rating and is **private to you** — no other reviewer sees it, now or later. Each rating keeps the note it was saved with, and editing the note afterwards is saved beside it rather than over it (see [Rating history](#rating-history)). (It was briefly shared with reviewers who had already rated; it is not any more. Say so to anyone who wrote one under the old rule.)
 - **The discussion tab** (`T`) is one thread per component, shared with the other human reviewers. It opens only once you have rated that component: until then nothing about it reaches you — not a post, not a name, not a count, not whether anybody has written at all. A judgement formed after reading somebody else's reasoning is no longer independent, which is what any later measure of agreement between reviewers rests on. Posts are flat and oldest-first, each carries its author's label as it stood when they wrote it, and you can edit or delete your own and nobody else's.
 
 Neither travels over the push API: `RunPayload` has no representation for a human reviewer at all, which is what makes a push structurally incapable of overwriting either. Both move between databases with `dumpdata --natural-primary` / `loaddata`.
+
+### Rating history
+
+Nothing a reviewer saves is overwritten. `core_classification` gains a row each time somebody rates a component, again each time they save a note on its own, and one per component for every FIX verdict at ingest; no row is ever updated. So the call each reviewer made *before* FIX's verdict and the discussion opened to them — their first row for that component — is still there after they change their mind having seen both.
+
+There are two places to read it:
+
+- **`core_classification_current`** is a view holding each reviewer's newest row per component: one row per reviewer per component, the label and note the rating page shows. It is what `core_classification` itself held before history was kept, so a query that meant "the ratings" means this.
+- **`core_classification`** holds every row. `created_at` is when that row was saved, and `action` is what saved it:
+  - `rate`: a label was submitted (a button or a key), or FIX's verdict was ingested.
+  - `note`: a note was saved on its own. The row repeats the label it sits beside, so count `rate` rows when counting changes of mind.
+  - `revised`: a rating already in the database when history began (migration 0010) that had been written more than once by then. Whatever it said before is lost, so it cannot stand in for a first call. It is timed at its last write.
+
+Each human reviewer's first call, where it is known:
+
+```sql
+SELECT c.*
+FROM core_classification AS c
+JOIN core_reviewer AS r ON r.id = c.reviewer_id AND r.kind = 'human'
+WHERE c.action = 'rate'
+  AND NOT EXISTS (
+    SELECT 1 FROM core_classification AS earlier
+    WHERE earlier.component_id = c.component_id
+      AND earlier.reviewer_id = c.reviewer_id
+      AND earlier.id < c.id
+  );
+```
+
+Join that to `core_classification_current` on `(component_id, reviewer_id)` to find the calls that changed, and compare its `created_at` with the reviewer's later `rate` rows, or with their discussion posts' `created_at`, to see what came between.
+
+`dumpdata core.classification` dumps every row. Each row's natural key is its own uuid, minted in the database that row was first saved in, so loading the same fixture twice adds nothing.
 
 ## Push runs to the deployment
 
@@ -161,7 +192,17 @@ ssh hetzner 'docker cp /tmp/fix-reasons.json melrater-melrater-1:/tmp/ &&
   docker exec melrater-melrater-1 python -m django refresh_metric_cohort'
 ```
 
-`loaddata` updates those rows in place — the labels and probabilities are the same values, and the timestamps become the laptop's — and it fails as a whole if the server lacks any of the runs.
+`loaddata` updates those rows in place — the labels and probabilities are the same values, and the timestamps become the laptop's — and it fails as a whole if the server lacks any of the runs. That was a one-time step, and since migration 0010 it no longer works this way: a classification's natural key is now its own uuid, minted separately by each database, so the same fixture would add a second copy of every verdict instead of updating the first.
+
+**Migration note (rating history).** Migration 0010 turns `core_classification` into the [history](#rating-history) and creates the `core_classification_current` view. Ratings made before it ran have no history: each becomes a single row, marked `revised` if it had already been written more than once. On the server it prints one line saying how many ratings it kept and how many it marked.
+
+It rewrites the whole table about five times: three table rebuilds, a uuid for every row, and dropping `updated_at`. FIX's contributions are copied every time, and the deployment serves nothing while the entrypoint migrates. So:
+
+1. Take a `VACUUM INTO` backup into `/srv/melrater/backups/`.
+2. Time `migrate` against a copy of it before deploying. The healthcheck's `start_period` (60 s) has to cover the migration.
+3. Afterwards, point hand-written queries that meant "the ratings" at `core_classification_current`.
+
+The view also constrains later migrations. SQLite will not let Django rebuild a table while a view reads it, so a migration that rebuilds `core_classification` (a constraint change, a new NOT NULL or unique field, most field alterations) has to drop the view first and create it again after (contributing.md).
 
 A successful push drops the superseded set itself (the row is pointed at the new digest, then every other digest of that run is deleted), so after a clean re-push `prune_orphan_montages` on the box reports nothing to do. Run it anyway: it is the safety net for a push that died between storing the files and writing the rows.
 

@@ -284,6 +284,23 @@ def test_rate_post_rejects_bad_label(logged_in, ingested_run: Run) -> None:
     assert response.status_code == 400
 
 
+def test_rerating_through_the_page_keeps_both_ratings(
+    logged_in, ingested_run: Run, user
+) -> None:
+    # Arrange
+    logged_in.post(f"/runs/{ingested_run.pk}/ic/2/rate/", {"label": "Noise"})
+
+    # Act
+    logged_in.post(f"/runs/{ingested_run.pk}/ic/2/rate/", {"label": "Signal"})
+
+    # Assert
+    assert list(
+        Classification.history.filter(reviewer__user=user, component__index=2)
+        .order_by("pk")
+        .values_list("label", flat=True)
+    ) == ["Noise", "Signal"]
+
+
 # --- notes -------------------------------------------------------------
 
 
@@ -430,6 +447,24 @@ def test_note_post_does_not_change_the_label(
     assert (
         Classification.objects.get(reviewer__user=user, component__index=2).label
         == "Noise"
+    )
+
+
+def test_note_post_after_rating_is_a_row_of_its_own(
+    logged_in, ingested_run: Run, user
+) -> None:
+    # Arrange
+    services.rate_component(
+        user=user, component=_component(ingested_run), label="Noise"
+    )
+
+    # Act
+    logged_in.post(f"/runs/{ingested_run.pk}/ic/2/note/", {"note": "edge ring"})
+
+    # Assert
+    assert (
+        Classification.objects.get(reviewer__user=user, component__index=2).action
+        == Classification.Action.NOTE
     )
 
 

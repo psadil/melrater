@@ -242,24 +242,72 @@ class Reviewer(models.Model):
 
 
 class ClassificationManager(models.Manager["Classification"]):
-    def get_by_natural_key(
-        self, index: int, run_uuid: str, reviewer_name: str
-    ) -> Classification:
-        return self.get(
-            component__index=index,
-            component__run__uuid=run_uuid,
-            reviewer__name=reviewer_name,
+    """Every row: each reviewer's whole history, not just where it ended.
+
+    The default manager (`Meta.default_manager_name`), because that is the one
+    `dumpdata`, `loaddata`'s natural-key lookup and the admin use. Were it the
+    current-rows manager, `dumpdata` would quietly drop the history and a
+    reloaded fixture would duplicate every row it no longer saw.
+    """
+
+    def get_by_natural_key(self, uuid: str) -> Classification:
+        return self.get(uuid=uuid)
+
+
+class CurrentClassificationManager(models.Manager["Classification"]):
+    """Each reviewer's newest row per component: where their rating stands now.
+
+    `Classification.objects`, so a reader that asks for a reviewer's rating
+    gets one row and the right one -- `.first()` on the whole history would
+    hand back the oldest. A row is current when no row with a higher id exists
+    for the same component and reviewer, which is the rule the
+    `core_classification_current` view applies for SQL written by hand
+    (migration 0010); a test pins that the two agree. Ids rather than
+    timestamps: SQLite's AUTOINCREMENT never reuses or reorders them, and
+    IMMEDIATE transactions serialize every write, so id order is the order the
+    rows were saved in.
+
+    Filters that go through a relation (`classifications__...`) join the
+    table, not this manager, and so see every row. That is right for the ones
+    this app has, which only ask whether a reviewer has rated at all.
+    """
+
+    def get_queryset(self) -> models.QuerySet[Classification]:
+        rows = super().get_queryset()
+        newer = rows.filter(
+            component=models.OuterRef("component"),
+            reviewer=models.OuterRef("reviewer"),
+            pk__gt=models.OuterRef("pk"),
         )
+        return rows.filter(~models.Exists(newer))
 
 
 class Classification(models.Model):
-    """A reviewer's current label for one component."""
+    """One label a reviewer gave one component, kept after they change it.
+
+    Append-only: a rating, a note saved on its own, and FIX's verdict at
+    ingest each add a row, and no row is ever updated. A reviewer's rating as
+    it stands is their newest row for the component (`Classification.objects`;
+    in SQL, the `core_classification_current` view), and their first row is
+    the call they made before FIX's verdict and the discussion opened to them
+    -- the one a change of mind used to overwrite.
+    """
 
     class Label(models.TextChoices):
         SIGNAL = "Signal", "Signal"
         NOISE = "Noise", "Noise"
         UNKNOWN = "Unknown", "Unknown"
 
+    class Action(models.TextChoices):
+        RATE = "rate", "Rated"
+        NOTE = "note", "Edited the note"
+        REVISED = "revised", "Revised before history was kept"
+
+    # The row's portable identity, as DiscussionPost.uuid is: a reviewer has
+    # many rows for one component, so (component, reviewer) no longer names
+    # one. Minted per database -- the same FIX verdict pushed to two servers is
+    # two uuids.
+    uuid = models.UUIDField(default=uuid4, unique=True, editable=False)
     component = models.ForeignKey(
         Component, on_delete=models.CASCADE, related_name="classifications"
     )
@@ -267,11 +315,28 @@ class Classification(models.Model):
         Reviewer, on_delete=models.CASCADE, related_name="classifications"
     )
     label = models.CharField(max_length=10, choices=Label.choices)
+    # What added this row. `note` rows repeat the label they gloss, so the
+    # newest row always holds both halves of where a rating stands; counting
+    # how often a reviewer changed their mind means counting `rate` rows.
+    # `revised` is migration 0010's alone: a row that had already been
+    # overwritten when history began, and whose earlier calls are lost.
+    action = models.CharField(
+        max_length=8,
+        choices=Action.choices,
+        default=Action.RATE,
+        help_text=(
+            "What added this row; 'revised' marks a rating already overwritten "
+            "when history began"
+        ),
+    )
     # Free text, private to its author: nobody else ever reads it, now or
     # later. The shared channel is DiscussionPost, which opens to a reviewer
     # once they have rated. On the row rather than in a table of its own
     # because the study's output is queried by hand out of the SQLite file,
-    # and a note is worth little without the label beside it. Length is
+    # and a note is worth little without the label beside it. Each row keeps
+    # the note as it was saved with that row -- a rating stores what its POST
+    # carried, and an edit made on its own is a row of its own -- so the note
+    # beside a first call is never rewritten by a later one. Length is
     # bounded in services, not here: a TextField has no cap in SQLite, and the
     # limit is a policy about what a rating note is for rather than a storage
     # fact.
@@ -294,10 +359,13 @@ class Classification(models.Model):
         blank=True,
         help_text="FIX's log-odds contribution per feature, when the reviewer is FIX",
     )
+    # When this row was saved. There is no `updated_at`: rows never change.
+    # Migration 0010 moved the old one in here for the ratings it marked
+    # `revised`, the moment the state they hold was last written.
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
-    objects: ClassVar[ClassificationManager] = ClassificationManager()
+    objects: ClassVar[CurrentClassificationManager] = CurrentClassificationManager()
+    history: ClassVar[ClassificationManager] = ClassificationManager()
 
     # Stub-only, like the reverse accessors above: django-stubs resolves a
     # ForeignKey's descriptor but not the implicit `<name>_id` column beside
@@ -307,14 +375,19 @@ class Classification(models.Model):
     reviewer_id: int
 
     class Meta:
-        constraints: ClassVar = [
-            models.UniqueConstraint(
-                fields=["component", "reviewer"], name="unique_rating_per_reviewer"
+        default_manager_name = "history"
+        # What the one-rating-per-reviewer constraint used to index, and what
+        # the current-rows rule probes for every row it keeps. SQLite appends
+        # the rowid to every index entry, so "a newer row for this pair" is a
+        # range scan on this index alone.
+        indexes: ClassVar = [
+            models.Index(
+                fields=["component", "reviewer"], name="classification_pair_idx"
             )
         ]
 
-    def natural_key(self) -> tuple[int, str, str]:
-        return (*self.component.natural_key(), *self.reviewer.natural_key())
+    def natural_key(self) -> tuple[str]:
+        return (str(self.uuid),)
 
     def __str__(self) -> str:
         return f"{self.reviewer}: {self.component} = {self.label}"
@@ -350,10 +423,10 @@ class DiscussionPost(models.Model):
         Reviewer, on_delete=models.CASCADE, related_name="posts"
     )
     # The author's label *at the moment they wrote this*, copied rather than
-    # joined. `rate_component` is an update_or_create, so a reviewer may change
-    # their mind at any time; a live join would rewrite the verdict shown
-    # beside every message they ever wrote about this component, and a post
-    # arguing for noise would end up captioned SIGNAL.
+    # joined. A reviewer may change their mind at any time, and their rating is
+    # whichever Classification row is newest; a live join to it would rewrite
+    # the verdict shown beside every message they ever wrote about this
+    # component, and a post arguing for noise would end up captioned SIGNAL.
     label = models.CharField(max_length=10, choices=Classification.Label.choices)
     body = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)

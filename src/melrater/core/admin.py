@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.http import HttpRequest
 
 from melrater.core.models import (
     Classification,
@@ -28,8 +29,23 @@ class ReviewerAdmin(admin.ModelAdmin):
 
 @admin.register(Classification)
 class ClassificationAdmin(admin.ModelAdmin):
-    list_display = ("component", "reviewer", "label", "probability", "updated_at")
-    list_filter = ("label", "reviewer")
+    list_display = (
+        "component",
+        "reviewer",
+        "label",
+        "action",
+        "probability",
+        "created_at",
+    )
+    list_filter = ("label", "action", "reviewer")
+
+    def has_change_permission(
+        self, request: HttpRequest, obj: Classification | None = None
+    ) -> bool:
+        # Append-only (see Classification): an edit in place would rewrite a
+        # reviewer's history under them. Delete is left alone, so removing a
+        # run, a component or a reviewer can still cascade through here.
+        return False
 
 
 @admin.register(DiscussionPost)

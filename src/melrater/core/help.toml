@@ -266,7 +266,7 @@ after seeing the classifier's is a call made against it, and the point of a \
 human rating is that it is not FIX's. Once shown it is a reference, not a \
 constraint — disagreeing with it is the point of rating."""
 bullets = [
-  "you can still change your rating after seeing it; what it is for is a second look where you and FIX part ways, not a correction",
+  "you can still change your rating after seeing it, and your first call is kept beside the new one rather than replaced; what it is for is a second look where you and FIX part ways, not a correction",
   "rating does not move you on to the next component, so the verdict is there to read; Space (or →) or the next-unrated link moves on",
 ]
 refs = ["salimi2014"]

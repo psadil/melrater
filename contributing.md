@@ -184,5 +184,20 @@ task's own env, where it wins.
   between a component with a thread and one without rather than by grepping
   for a sentinel. A post's `label` is copied at write time rather than joined,
   so re-rating never retitles what somebody already said.
+- **`Classification` is append-only.** A rating, a note saved on its own and
+  FIX's verdict at ingest each add a row, and nothing updates one, so the
+  call a reviewer made before FIX's verdict and the thread opened to them
+  survives a change of mind. `Classification.objects` returns current rows
+  only — each reviewer's newest row per component — which is what every
+  reader wants, and what `.first()` over the whole table would get wrong.
+  `Classification.history` is every row; it is the default manager so that
+  `dumpdata`, `loaddata` and the admin see all of it, and it is what writes go
+  through. The SQL view `core_classification_current` applies the same rule
+  for queries written by hand, and a test pins that the two agree. SQLite
+  refuses to rebuild a table while a view reads it, so a migration that
+  rebuilds `core_classification` (a constraint change, a new NOT NULL or
+  unique field, most `AlterField`s) must drop the view first and create it
+  again after — 0010 has the SQL. The test database runs every migration, so
+  forgetting fails there, loudly, before it can fail on a deploy.
 - **Django template comments are single-line.** `{# ... #}` spanning two lines
   renders as visible page text; use `{% comment %}` for anything longer.

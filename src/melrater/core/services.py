@@ -103,48 +103,73 @@ def rate_component(
     label: str,
     note: str | None = None,
 ) -> Classification:
-    """Store one reviewer's label, and their note when one was sent.
+    """Add one reviewer's label as a new row, beside every earlier one.
 
-    `note=None` means "leave whatever is there alone" -- a caller that has no
-    note must not blank one, and `update_or_create` blanks everything it is
-    handed. `note=""` is a real value: it clears the note.
+    `note=None` means "leave whatever is there alone": the new row carries the
+    current note forward, so a caller that has no note cannot blank one.
+    `note=""` is a real value, and the new row's note is empty.
     """
     if label not in Classification.Label.values:
         raise ValueError(f"invalid label: {label!r}")
-    defaults: dict[str, str] = {"label": label}
-    if note is not None:
-        defaults["note"] = _clean_text(note, limit=NOTE_MAX_LENGTH, what="note")
-    reviewer = reviewer_for_user(user)
-    classification, _ = Classification.objects.update_or_create(
-        component=component, reviewer=reviewer, defaults=defaults
+    cleaned = (
+        None if note is None else _clean_text(note, limit=NOTE_MAX_LENGTH, what="note")
     )
-    return classification
+    reviewer = reviewer_for_user(user)
+    # One transaction, so reading the note to carry forward and adding the row
+    # cannot interleave with another write: under transaction_mode=IMMEDIATE
+    # the block holds SQLite's write lock from its first statement.
+    with transaction.atomic():
+        if cleaned is None:
+            current = Classification.objects.filter(
+                component=component, reviewer=reviewer
+            ).first()
+            cleaned = str(current.note) if current is not None else ""
+        return Classification.history.create(
+            component=component,
+            reviewer=reviewer,
+            label=label,
+            note=cleaned,
+            action=Classification.Action.RATE,
+        )
 
 
 def set_component_note(
     *, user: AbstractBaseUser, component: Component, note: str
 ) -> Classification | None:
-    """Store a note on an existing rating; None when there is no rating yet.
+    """Save a note against the current rating; None when there is no rating yet.
 
-    Refuses to create the row rather than inventing a label: a Classification
+    Refuses to create a rating rather than inventing a label: a Classification
     is a decision, and a note is a gloss on one. The page's other save path --
     the note riding along with the rating POST -- is what covers the reviewer
     who types before deciding.
+
+    A changed note is a row of its own, carrying the current label, never an
+    edit of the rating it glosses: every rating keeps the note it was sent
+    with. That also settles the race the page sets up when a reviewer edits
+    their note and then re-rates -- the blur save can land first, and it then
+    adds (old label, new note) without touching the old rating's own note. An
+    unchanged note adds nothing, which is the usual case of a blur save
+    arriving after a rating POST that already carried the same text.
     """
     # Before the existence check, so an over-length note is refused whether or
     # not this reviewer has rated.
     cleaned = _clean_text(note, limit=NOTE_MAX_LENGTH, what="note")
     reviewer = reviewer_for_user(user)
-    classification = Classification.objects.filter(
-        component=component, reviewer=reviewer
-    ).first()
-    if classification is None:
-        return None
-    classification.note = cleaned
-    # `updated_at` is auto_now, and auto_now only fires for fields named in
-    # update_fields -- omitting it would leave the column lying about the row.
-    classification.save(update_fields=("note", "updated_at"))
-    return classification
+    # One transaction for the reason `rate_component` gives: the label copied
+    # here must still be the current one when the row lands.
+    with transaction.atomic():
+        current = Classification.objects.filter(
+            component=component, reviewer=reviewer
+        ).first()
+        if current is None or current.note == cleaned:
+            return current
+        return Classification.history.create(
+            component=component,
+            reviewer=reviewer,
+            label=current.label,
+            note=cleaned,
+            action=Classification.Action.NOTE,
+        )
 
 
 # --- discussion --------------------------------------------------------------
@@ -309,7 +334,7 @@ def ingest_run(*, source: melodic.MelodicSource, image_workers: int = 0) -> Run:
             for result in source.fix_results:
                 reviewer = _fix_reviewer(result)
                 explained = result.contributions
-                Classification.objects.bulk_create(
+                Classification.history.bulk_create(
                     Classification(
                         component=component,
                         reviewer=reviewer,
@@ -608,7 +633,7 @@ def create_pushed_run(*, payload: RunPayload) -> Run:
         )
         for fix in payload.fix:
             reviewer = _pushed_fix_reviewer(fix)
-            Classification.objects.bulk_create(
+            Classification.history.bulk_create(
                 Classification(
                     component=component,
                     reviewer=reviewer,
